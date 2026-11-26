@@ -3802,7 +3802,7 @@ mod tests {
     /// `binary.function_at(<the address a real call instruction targets>)`
     /// can never find the import, and every PLT-indirected call falls back
     /// to a generic `sub_<addr>` name regardless of how good FID/symbol
-    /// matching is elsewhere. Confirmed on bin_000.elf from the DecBench
+    /// matching is elsewhere. Confirmed on bin_000.elf from the benchmark
     /// sample-set: `select`/`read`/`close`/`pause` (106 dynamic imports
     /// total) all called through `.plt.sec`, none resolved to a name.
     #[test]

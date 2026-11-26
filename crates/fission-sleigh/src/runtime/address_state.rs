@@ -44,7 +44,7 @@ impl RuntimeSleighFrontend {
     /// Some callers only have an *even* address for a Thumb-only target
     /// (ARMv7-M/Cortex-M has no ARM-mode execution at all, but toolchains and
     /// external tools frequently normalize away the ABI's bit-0 Thumb
-    /// marker before reporting an address -- see e.g. DecBench's eval kit,
+    /// marker before reporting an address -- see e.g. one benchmark's eval kit,
     /// which documents reporting "the even address" for ARM/Thumb targets).
     /// `normalize_low_bit_code_address` alone can't recover the mode in that
     /// case since it trusts the address's own bit 0; this lets a caller force

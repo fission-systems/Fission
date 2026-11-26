@@ -44,5 +44,5 @@ Symptoms: types look fine internally but pseudocode unreadable.
 ## 7. Regression scale-up
 
 Run the relevant crate suite with `cargo nextest run -p <crate>`. For a quality
-claim, attach cache-disabled before/after evidence following the
-[DecBench guide](../BENCHMARK_DECBENCH.md).
+claim, attach before/after FreshBench runs (`freshbench sweep diff`, then
+`sweep report`) following the [FreshBench guide](../BENCHMARK_FRESHBENCH.md).

@@ -425,8 +425,8 @@ lifecycle. Existing CI and release gates remain authoritative.
 
 GitHub fills in [`.github/pull_request_template.md`](./.github/pull_request_template.md)
 when you open a pull request. If your change can alter decompiler output, its
-"Benchmark Impact" block needs a DecBench measurement (see
-[`docs/BENCHMARK_DECBENCH.md`](./docs/BENCHMARK_DECBENCH.md)).
+"Benchmark Impact" block needs a FreshBench measurement (see
+[`docs/BENCHMARK_FRESHBENCH.md`](./docs/BENCHMARK_FRESHBENCH.md)).
 
 ### Review Process
 

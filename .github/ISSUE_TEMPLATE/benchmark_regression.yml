@@ -1,6 +1,6 @@
 name: Benchmark regression
 
-description: Report a DecBench regression (local sample-set gate or full-dataset sweep).
+description: Report a FreshBench regression (a sliced pre-check or the full M1 sweep).
 title: "benchmark: "
 labels:
   - benchmark
@@ -19,9 +19,8 @@ body:
     attributes:
       label: Benchmark suite
       options:
-        - DecBench local sample-set gate
-        - DecBench full sweep (unoptimized)
-        - DecBench full sweep (other config)
+        - FreshBench M1 slice (--builds / --only)
+        - FreshBench M1 full sweep
         - other
     validations:
       required: true
@@ -30,7 +29,7 @@ body:
     id: artifact
     attributes:
       label: Artifact path or URL
-      placeholder: /tmp/gate_after.json (--dump output) or the sweep checkpoint directory
+      placeholder: runs/<label>/ (the freshbench sweep run directory)
     validations:
       required: true
 
@@ -41,8 +40,8 @@ body:
       render: bash
       placeholder: |
         cargo build -p fission-cli --release
-        python scripts/quality/decbench_sample_set_gate.py check \
-          --cli target/release/fission_cli --dump /tmp/gate_after.json
+        freshbench sweep run ~/freshbench-data/m1 --cli target/release/fission_cli --repo "$PWD" --label after
+        freshbench sweep diff runs/before runs/after
     validations:
       required: true
 
@@ -52,9 +51,9 @@ body:
       label: Metric deltas / failing rows
       render: text
       placeholder: |
-        total GED: 1234 -> 1310
-        perfect matches: 88 -> 81
-        worst row: <binary>::<function>
+        GED mean distance: 4.12 -> 4.31
+        perfect (rows at 0): 88 -> 81
+        worst row: <build>/<project>/<binary> @ 0x...
     validations:
       required: true
 

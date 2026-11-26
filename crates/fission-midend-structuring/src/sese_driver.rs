@@ -812,7 +812,7 @@ fn build_sese_region_body_impl(
 /// a structuring of it: a million statements is already tens of megabytes of C
 /// for one function, which no consumer of this output can use. The ceiling is
 /// therefore set to catch the bug, not to tune the result, and the gap it sits
-/// in is wide. Measured over 3,954 functions of the DecBench corpus:
+/// in is wide. Measured over 3,954 functions of a benchmark corpus:
 ///
 /// ```text
 /// largest legitimate region       11,928   (bzip2)

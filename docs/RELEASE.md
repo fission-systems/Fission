@@ -17,7 +17,7 @@ gh workflow run "Prepare Release PR" --ref main -f version=vX.Y.Z
 Choose the version following [Versioning](VERSIONING.md). The workflow
 bumps the version, drafts `docs/changelog/vX.Y.Z.md` from the merged PRs and
 opens `release: vX.Y.Z`. Review the notes, fill every `TODO(release)` block
-(the full-dataset DecBench table and, when no issue is labelled, the known
+(the benchmark table and, when no issue is labelled, the known
 limitations), and merge it. Then confirm a Fast Gate main push run (L0) and
 dispatch Heavy (L1) on the merge commit, and dispatch the tag:
 
@@ -76,7 +76,8 @@ publication.
 
 ## 4. Attach quality evidence when claiming an improvement
 
-Link cache-disabled before/after full sweeps on matching rows, dataset revision
-and scorer. Report output changes, failure transitions, GED perfect count and
-total distance, and type results. Follow the
-[DecBench evidence rules](BENCHMARK_DECBENCH.md).
+Link before/after full FreshBench M1 runs with the same corpus id and scorer
+(`freshbench sweep diff` refuses runs scored by different scorers). Report
+output changes, failure transitions, GED perfect count next to distance, and
+type results. Follow the
+[FreshBench evidence rules](BENCHMARK_FRESHBENCH.md).

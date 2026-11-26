@@ -9,7 +9,7 @@
 //!
 //! # Nothing here executes a corpus binary, and nothing here may
 //!
-//! The DecBench corpus contains malware compiled from source. The rule for it
+//! The benchmark corpus contains malware compiled from source. The rule for it
 //! is static analysis only: never run, never `chmod +x`, never load into an
 //! emulator "just to see". This benchmark obeys that by construction -- it
 //! reads bytes, decodes them, lifts them to p-code and hands the p-code to the

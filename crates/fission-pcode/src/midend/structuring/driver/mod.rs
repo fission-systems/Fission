@@ -492,7 +492,7 @@ mod tests {
     }
 
     /// Pins the block-count-only ExtremeBudget threshold. Raised from 192 to
-    /// 600 after measuring on the DecBench sample-set corpus: reducible
+    /// 600 after measuring on the benchmark sample-set corpus: reducible
     /// (scc_irreducible_count == 0) functions with 122-207 blocks were being
     /// force-linearized on size alone, well short of any real structuring
     /// cost problem (full SESE structuring completed in 2-3.6s each). ~3x
