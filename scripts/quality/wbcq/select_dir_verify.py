@@ -11,12 +11,12 @@ the candidates. Only the DWARF is read from the match; addresses are those of
 the matched `.text`, which are the stripped binary's own. A binary with no
 byte-identical match is skipped and reported.
 
-The selection reads only the signature, as `select_decbench.py` does: the
+The selection reads only the signature, as `select_step_functions.py` does: the
 body (calls, globals, loops) is not filtered. Every candidate is kept (no
 sampling); one copy per (binary, function).
 
   python3 scripts/quality/wbcq/select_dir_verify.py ~/fission-benchmark/dir-verify/binaries \\
-      --debug-root ~/fission-benchmark/decbench-data/binaries \\
+      --debug-root <directory of unstripped builds> \\
       --out ~/fission-benchmark/wbcq-p4/dir_verify_candidates.json
 """
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from elftools.elf.elffile import ELFFile
 
-from select_decbench import candidates
+from select_step_functions import candidates
 
 
 def text_key(path: Path) -> tuple[int, int, str] | None:

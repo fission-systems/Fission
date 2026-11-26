@@ -65,7 +65,6 @@ nav:
   - Architecture: architecture/ARCHITECTURE.md
   - Benchmarks:
     - FreshBench: BENCHMARK_FRESHBENCH.md
-    - DecBench: BENCHMARK_DECBENCH.md
     - Quality metrics: QUALITY_METRICS.md
   - Evaluation: EVALUATION.md
   - Contributing: contributing.md

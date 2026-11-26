@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Select step-shaped functions from the DecBench binaries for the WBCQ P3
-evaluation (RFC #1093), part (c): real code, not written for the method.
+"""Select step-shaped functions from the FreshBench M1 binaries for the WBCQ
+P3 evaluation (RFC #1093), part (c): real code, not written for the method.
 
 A function is step-shaped when its DWARF signature is exactly
 `<integer> f(<struct> *ctx, <integer> in)` -- a context it can keep state in, one
@@ -10,13 +10,17 @@ defined over. The selection reads only the signature: nothing about the body
 (calls, globals, loops) is filtered, so the measured status distribution is
 the method's on that population, not on a hand-picked part of it.
 
-x86-64 ELF binaries of the `unoptimized`, `optimized` and `inlined` configs are
-read (the evaluation runs one ISA; ADR 0009 parity is the corpus's job).
-Writes a JSON list of candidates; --limit samples evenly over (project, opt)
-with a fixed seed.
+The unstripped x86-64 builds are read (`m1/binaries/<build>/...` for builds
+without an architecture prefix; the evaluation runs one ISA, and ADR 0009
+parity is the corpus's job), and only each binary's target functions
+(`m1/truth/<build>/<project>/targets.json`). Writes a JSON list of
+candidates; --limit samples evenly over (project, opt) with a fixed seed.
 
-  python3 scripts/quality/wbcq/select_decbench.py ~/fission-benchmark/decbench-data \\
-      --out ~/fission-benchmark/wbcq-p3/decbench_candidates.json
+The P3 results recorded in docs/proposals were taken on an earlier corpus;
+this selection draws a new population.
+
+  python3 scripts/quality/wbcq/select_step_functions.py ~/freshbench-data \\
+      --out ~/fission-benchmark/wbcq-p3/candidates.json
 """
 
 from __future__ import annotations
@@ -28,7 +32,8 @@ from pathlib import Path
 
 from elftools.elf.elffile import ELFFile
 
-CONFIGS = ("unoptimized", "optimized", "inlined")
+# Build names carry the architecture except on x86-64.
+OTHER_ARCHES = ("i686-", "aarch64-", "armv7-")
 INTEGER_ENCODINGS = {0x02, 0x05, 0x06, 0x07, 0x08, 0x10}  # boolean, signed, signed_char, unsigned, unsigned_char, UTF
 
 
@@ -109,7 +114,7 @@ def candidates(binary: Path) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("data", type=Path, help="DecBench dataset root")
+    parser.add_argument("data", type=Path, help="FreshBench data root (the directory holding m1/)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=300)
     parser.add_argument("--seed", type=int, default=1093)
@@ -117,24 +122,27 @@ def main() -> None:
     data = args.data.expanduser()
     population = []
     seen = set()
-    for config in CONFIGS:
-        manifest = json.loads((data / "configs" / config / "manifest.json").read_text())
-        for entry in manifest["binaries"]:
-            path = data / entry["binary_path"]
+    for targets_file in sorted((data / "m1" / "truth").glob("*/*/targets.json")):
+        build = targets_file.parent.parent.name
+        if build.startswith(OTHER_ARCHES):
+            continue
+        targets = json.loads(targets_file.read_text())
+        for name, binary in sorted(targets["binaries"].items()):
+            path = data / "m1" / "binaries" / build / targets["project"] / name
             if not path.exists() or path in seen:
                 continue
             seen.add(path)
-            scored = set(entry.get("functions", []))
+            scored = {function["name"] for function in binary["functions"]}
             try:
                 rows = candidates(path)
             except Exception as error:  # a binary pyelftools cannot read
                 print(f"skip {path}: {error}")
                 continue
             for row in rows:
-                if scored and row["function"] not in scored:
+                if row["function"] not in scored:
                     continue
-                population.append({"config": config, "project": entry["project"],
-                                   "opt": entry["opt"], "binary": str(path), **row})
+                population.append({"build": build, "project": targets["project"],
+                                   "opt": targets["config"], "binary": str(path), **row})
     # One copy of a function per (project, opt): the same source compiled into
     # several programs of a project is one data point, not several.
     unique = {}
