@@ -16,7 +16,8 @@ use crate::os::env::HleResult;
 use crate::os::linux::abi::{StatLayout, TargetStat};
 use crate::os::linux::libc::read_string;
 use crate::os::procedure::SimProcedure;
-use crate::pcode::page_map::{guest_addr_span, page_align_up, prot};
+use crate::os::vfs::VfsOpenAccess;
+use crate::pcode::page_map::{MmapPlacementError, PAGE_SIZE, guest_addr_span, page_align_up, prot};
 use anyhow::Result;
 
 fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
@@ -300,9 +301,14 @@ pub struct SysOpen;
 impl SimProcedure for SysOpen {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let filename_ptr = emu.syscall_arg(0);
+        let flags = emu.syscall_arg(1);
         let filename = read_string(emu, filename_ptr).unwrap_or_else(|_| "unknown".into());
-        tracing::info!("sys_open(\"{}\")", filename);
-        let fd = emu.vfs.open(&filename, Vec::new());
+        tracing::info!("sys_open(\"{}\", flags=0x{:X})", filename, flags);
+        let fd = emu.vfs.open_with_access(
+            &filename,
+            Vec::new(),
+            VfsOpenAccess::from_linux_open_flags(flags),
+        );
         emu.set_syscall_return(fd)?;
         Ok(HleResult::Continue)
     }
@@ -323,7 +329,11 @@ impl SimProcedure for SysOpenat {
             flags
         );
         // O_DIRECTORY / missing file: still return a seed fd when path is registered.
-        let fd = emu.vfs.open(&filename, Vec::new());
+        let fd = emu.vfs.open_with_access(
+            &filename,
+            Vec::new(),
+            VfsOpenAccess::from_linux_open_flags(flags),
+        );
         // If open produced an empty never-seeded file and path is absolute missing, return -ENOENT.
         if let Some(sz) = emu.vfs.file_size(fd) {
             if sz == 0
@@ -541,25 +551,205 @@ impl SimProcedure for SysAccess {
 /// of whatever had been mapped there earlier (a `malloc` that trusts fresh
 /// pages to be zero then returns somebody else's data), and one made without
 /// `PROT_WRITE` was not filled at all -- not even with its file.
-pub(crate) fn fill_new_mapping(
-    emu: &mut Emulator,
-    base: u64,
-    length: u64,
-    file: Option<(u64, usize)>,
-) {
-    let len = page_align_up(length.max(1));
-    // Whatever was translated from these pages is not what they hold now.
-    emu.jit_cache.invalidate_range(base, len);
-    emu.state.zero_range(base, len);
-    let Some((fd, offset)) = file else { return };
-    let want = usize::try_from(length).unwrap_or(usize::MAX);
-    let data = match emu.vfs.file_bytes(fd, offset, want) {
-        Ok(bytes) => bytes.to_vec(),
-        Err(_) => return,
-    };
-    if !data.is_empty() {
-        let _ = emu.state.write_ram_unprotected(base, &data);
+const MAP_TYPE_MASK: u64 = 0x0f;
+const MAP_SHARED: u64 = 0x01;
+const MAP_PRIVATE: u64 = 0x02;
+const MAP_SHARED_VALIDATE: u64 = 0x03;
+const MAP_FIXED: u64 = 0x10;
+const MAP_ANONYMOUS: u64 = 0x20;
+const MAP_GROWSDOWN: u64 = 0x0100;
+const MAP_DENYWRITE: u64 = 0x0800;
+const MAP_EXECUTABLE: u64 = 0x1000;
+const MAP_LOCKED: u64 = 0x2000;
+const MAP_NORESERVE: u64 = 0x4000;
+const MAP_POPULATE: u64 = 0x8000;
+const MAP_NONBLOCK: u64 = 0x10000;
+const MAP_STACK: u64 = 0x20000;
+const MAP_HUGETLB: u64 = 0x40000;
+const MAP_SYNC: u64 = 0x80000;
+const MAP_FIXED_NOREPLACE: u64 = 0x100000;
+
+const SUPPORTED_PRIVATE_FLAGS: u64 = MAP_TYPE_MASK
+    | MAP_FIXED
+    | MAP_FIXED_NOREPLACE
+    | MAP_ANONYMOUS
+    | MAP_GROWSDOWN
+    | MAP_DENYWRITE
+    | MAP_EXECUTABLE
+    | MAP_LOCKED
+    | MAP_NORESERVE
+    | MAP_POPULATE
+    | MAP_NONBLOCK
+    | MAP_STACK
+    | MAP_HUGETLB
+    | MAP_SYNC;
+
+/// Validated guest `mmap` parameters (shared by syscall and libc HLE).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MmapRequest {
+    pub addr: u64,
+    pub length: u64,
+    pub prot: u64,
+    pub flags: u64,
+    pub fd: i64,
+    pub offset_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MmapError {
+    BadFd,
+    NoMemory,
+    AccessDenied,
+    Exists,
+    NoDevice,
+    InvalidArgument,
+    Unsupported,
+}
+
+impl MmapError {
+    pub(crate) const fn linux_errno(self) -> i64 {
+        match self {
+            Self::BadFd => 9,            // EBADF
+            Self::NoMemory => 12,        // ENOMEM
+            Self::AccessDenied => 13,    // EACCES
+            Self::Exists => 17,          // EEXIST
+            Self::NoDevice => 19,        // ENODEV
+            Self::InvalidArgument => 22, // EINVAL
+            Self::Unsupported => 95,     // EOPNOTSUPP
+        }
     }
+}
+
+/// Shared canonical Linux `mmap` implementation used by both [`SysMmap`] and
+/// [`super::libc::Mmap`].
+///
+/// Validates request geometry, protection bits, flags, descriptor mappability
+/// and access, and EOF bounds, and stages file bytes *before* mutating
+/// `PageMap` or guest RAM so rejected calls leave guest state untouched.
+pub(crate) fn execute_mmap(
+    emu: &mut Emulator,
+    req: MmapRequest,
+) -> std::result::Result<u64, MmapError> {
+    if req.length == 0 || (req.prot & !0x07) != 0 {
+        return Err(MmapError::InvalidArgument);
+    }
+
+    let map_type = req.flags & MAP_TYPE_MASK;
+    match map_type {
+        MAP_PRIVATE => {}
+        MAP_SHARED => return Err(MmapError::Unsupported),
+        MAP_SHARED_VALIDATE => {
+            if (req.flags & !SUPPORTED_PRIVATE_FLAGS) != 0 {
+                return Err(MmapError::InvalidArgument);
+            }
+            return Err(MmapError::Unsupported);
+        }
+        _ => return Err(MmapError::InvalidArgument),
+    }
+
+    if (req.flags & (MAP_HUGETLB | MAP_SYNC)) != 0 {
+        return Err(MmapError::Unsupported);
+    }
+
+    let map_fixed_noreplace = (req.flags & MAP_FIXED_NOREPLACE) != 0;
+    let map_fixed = (req.flags & MAP_FIXED) != 0 || map_fixed_noreplace;
+    let map_anon = (req.flags & MAP_ANONYMOUS) != 0;
+
+    let max_addr = emu.state.page_map.max_address();
+    if req.length > max_addr {
+        return Err(MmapError::NoMemory);
+    }
+    let aligned_len = req
+        .length
+        .checked_add(PAGE_SIZE - 1)
+        .map(|end| end & !(PAGE_SIZE - 1))
+        .filter(|&len| len > 0 && len <= max_addr)
+        .ok_or(MmapError::NoMemory)?;
+
+    if map_fixed && (req.addr == 0 || req.addr % PAGE_SIZE != 0) {
+        return Err(MmapError::InvalidArgument);
+    }
+    if map_fixed
+        && req
+            .addr
+            .checked_add(aligned_len)
+            .is_none_or(|end| end > max_addr)
+    {
+        return Err(MmapError::NoMemory);
+    }
+
+    let staged_bytes = if !map_anon {
+        if req.fd < 0 {
+            return Err(MmapError::BadFd);
+        }
+        let fd = req.fd as u64;
+        let mappable = emu.vfs.is_mappable(fd).map_err(|_| MmapError::BadFd)?;
+        if !mappable {
+            return Err(MmapError::NoDevice);
+        }
+        let access = emu.vfs.file_access(fd).map_err(|_| MmapError::BadFd)?;
+        if !access.allows_read() {
+            return Err(MmapError::AccessDenied);
+        }
+        if req.offset_bytes % PAGE_SIZE != 0 {
+            return Err(MmapError::InvalidArgument);
+        }
+        let map_file_end = req
+            .offset_bytes
+            .checked_add(aligned_len)
+            .ok_or(MmapError::InvalidArgument)?;
+        let file_size = emu.vfs.file_size(fd).ok_or(MmapError::BadFd)? as u64;
+        let eof_page_end = page_align_up(file_size);
+        if map_file_end > eof_page_end {
+            // Unmodeled beyond-EOF SIGBUS pages are explicitly refused rather
+            // than fabricated as zero-filled mapped memory.
+            return Err(MmapError::Unsupported);
+        }
+        let offset = usize::try_from(req.offset_bytes).map_err(|_| MmapError::InvalidArgument)?;
+        let want = usize::try_from(req.length).unwrap_or(usize::MAX);
+        Some(
+            emu.vfs
+                .file_bytes(fd, offset, want)
+                .map_err(|_| MmapError::BadFd)?
+                .to_vec(),
+        )
+    } else {
+        None
+    };
+
+    let page_prot = ((req.prot as u8) & 0x07) | prot::VALID;
+    let saved_layout = emu.state.page_map.snapshot_layout();
+    let placed = if map_fixed_noreplace {
+        emu.state
+            .page_map
+            .try_map_fixed_noreplace(req.addr, aligned_len, page_prot, map_anon)
+    } else if map_fixed {
+        emu.state
+            .page_map
+            .try_map_fixed_replace(req.addr, aligned_len, page_prot, map_anon)
+    } else {
+        emu.state
+            .page_map
+            .try_map_hint_or_any(req.addr, aligned_len, page_prot, map_anon)
+    };
+    let base = match placed {
+        Ok(base) => base,
+        Err(MmapPlacementError::Exists) => return Err(MmapError::Exists),
+        Err(MmapPlacementError::InvalidRange) => return Err(MmapError::InvalidArgument),
+        Err(MmapPlacementError::NoMemory) => return Err(MmapError::NoMemory),
+    };
+
+    emu.jit_cache.invalidate_range(base, aligned_len);
+    emu.state.zero_range(base, aligned_len);
+    if let Some(data) = staged_bytes
+        && !data.is_empty()
+        && emu.state.write_ram_unprotected(base, &data).is_err()
+    {
+        emu.state.page_map.restore_layout(saved_layout);
+        return Err(MmapError::NoMemory);
+    }
+
+    Ok(base)
 }
 
 pub struct SysMmap;
@@ -569,50 +759,60 @@ impl SimProcedure for SysMmap {
         // x86-64 syscall ABI: rdi, rsi, rdx, r10, r8, r9
         let addr = emu.syscall_arg(0);
         let length = emu.syscall_arg(1);
-        let prot_bits = emu.syscall_arg(2) as u8;
+        let prot = emu.syscall_arg(2);
         let flags = emu.syscall_arg(3);
         let fd = emu.syscall_arg(4) as i64;
-        let offset = emu.syscall_arg(5) as usize;
-        let page_prot = (prot_bits & 0x07) | prot::VALID;
-        let map_fixed = flags & 0x10 != 0; // MAP_FIXED
-        let map_anon = flags & 0x20 != 0; // MAP_ANONYMOUS
+        let raw_offset = emu.syscall_arg(5);
+        // 32-bit `mmap2` (syscall 192) passes page-shifted offsets.
+        let offset_bytes = if emu.arch.pointer_size == 4 && emu.raw_syscall_number() == 192 {
+            match raw_offset.checked_mul(PAGE_SIZE) {
+                Some(v) => v,
+                None => {
+                    emu.set_syscall_return((-MmapError::InvalidArgument.linux_errno()) as u64)?;
+                    return Ok(HleResult::Continue);
+                }
+            }
+        } else {
+            raw_offset
+        };
 
-        if length == 0 {
-            // Linux: "EINVAL (since Linux 2.6.12) length was 0." This took it
-            // as one byte and mapped a page.
-            emu.set_syscall_return((-22i64) as u64)?;
-            return Ok(HleResult::Continue);
-        }
-        let base = emu
-            .state
-            .page_map
-            .mmap_with_hint(addr, length, page_prot, map_fixed);
-        if base == 0 {
-            // mmap_anon found no free hole; report it rather than handing the
-            // guest address 0 as a successful mapping.
-            tracing::warn!("sys_mmap(len={length}) -> -ENOMEM");
-            emu.set_syscall_return((-12i64) as u64)?; // -ENOMEM
-            return Ok(HleResult::Continue);
-        }
-
-        fill_new_mapping(
-            emu,
-            base,
-            length,
-            (!map_anon && fd >= 0).then_some((fd as u64, offset)),
-        );
-
-        emu.set_syscall_return(base)?;
-        tracing::info!(
-            "sys_mmap(addr=0x{:X}, len={}, prot=0x{:X}, flags=0x{:X}, fd={}, off={}) -> 0x{:X}",
+        let req = MmapRequest {
             addr,
             length,
-            page_prot,
+            prot,
             flags,
             fd,
-            offset,
-            base
-        );
+            offset_bytes,
+        };
+        match execute_mmap(emu, req) {
+            Ok(base) => {
+                emu.set_syscall_return(base)?;
+                tracing::info!(
+                    "sys_mmap(addr=0x{:X}, len={}, prot=0x{:X}, flags=0x{:X}, fd={}, off=0x{:X}) -> 0x{:X}",
+                    addr,
+                    length,
+                    prot,
+                    flags,
+                    fd,
+                    offset_bytes,
+                    base
+                );
+            }
+            Err(err) => {
+                let errno = err.linux_errno();
+                tracing::warn!(
+                    "sys_mmap(addr=0x{:X}, len={}, prot=0x{:X}, flags=0x{:X}, fd={}, off=0x{:X}) -> -errno {}",
+                    addr,
+                    length,
+                    prot,
+                    flags,
+                    fd,
+                    offset_bytes,
+                    errno
+                );
+                emu.set_syscall_return((-errno) as u64)?;
+            }
+        }
         Ok(HleResult::Continue)
     }
 }

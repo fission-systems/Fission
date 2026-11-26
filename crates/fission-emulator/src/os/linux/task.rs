@@ -869,28 +869,27 @@ mod tests {
     fn a_read_only_file_mapping_holds_the_file() {
         let env = LinuxEnv::new();
         let mut emu = emulator();
-        let fd = emu.vfs.open("lib.so", b"\x7fELF and the rest".to_vec());
+        let mut data = vec![b'.'; 0x1000];
+        data.extend_from_slice(b" and the rest!!!");
+        let fd = emu.vfs.open("lib.so", data);
         const MAP_PRIVATE: u64 = 2;
         const PROT_READ: u64 = 1;
         dispatch_syscall(
             &env,
             &mut emu,
             9,
-            [0, 0x2000, PROT_READ, MAP_PRIVATE, fd, 4],
+            [0, 0x1000, PROT_READ, MAP_PRIVATE, fd, 0x1000],
         );
         let base = read_syscall_result(&mut emu) as u64;
         assert!(base > 0x1000, "mapped: 0x{base:X}");
         let ram = emu.state.ram_space();
         assert_eq!(
-            emu.state.read_space(ram, base, 12).unwrap(),
-            b" and the res"
+            emu.state.read_space(ram, base, 16).unwrap(),
+            b" and the rest!!!"
         );
-        // Past the end of the file the mapping is zero, and it stays
-        // read-only to the guest.
-        assert_eq!(
-            emu.state.read_space(ram, base + 0x1000, 8).unwrap(),
-            [0u8; 8]
-        );
+        // Past the end of the file within the partial EOF page the mapping is
+        // zero, and it stays read-only to the guest.
+        assert_eq!(emu.state.read_space(ram, base + 16, 8).unwrap(), [0u8; 8]);
         assert!(emu.state.write_space(ram, base, b"x").is_err());
     }
 
