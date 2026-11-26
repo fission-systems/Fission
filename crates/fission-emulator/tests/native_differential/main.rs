@@ -293,7 +293,7 @@ impl<'a> Harness<'a> {
                     stats.random_mnemonics.insert(mn.clone());
                 }
                 let mask = (self.target.mask)(bytes, &lifted, input);
-                let lane = float_lane_width(&lifted.ops);
+                let lane = float_lane_width(&lifted.mnemonic, &lifted.ops);
                 let mut diffs = model::compare(self.target.isa, mask, lane, input, &n, &f);
                 if half_precision(&lifted.ops) {
                     for d in &mut diffs {
@@ -448,8 +448,10 @@ fn half_precision(ops: &[PcodeOp]) -> bool {
 /// The byte width of the float elements an instruction produces: the output of
 /// its last value-producing float op (a widening lift ends on the wide format,
 /// a narrowing one on the narrow format). A lift that only compares floats and
-/// selects bits (FMAX, MINSS) has the width it compares. `None` without any.
-fn float_lane_width(ops: &[PcodeOp]) -> Option<u32> {
+/// selects bits (FMAX, MINSS) has the width it compares. A float user op shows
+/// no float op in the p-code, so its width comes from the mnemonic. `None`
+/// without any.
+fn float_lane_width(mnemonic: &str, ops: &[PcodeOp]) -> Option<u32> {
     use fission_pcode_ir::ir::PcodeOpcode as O;
     let produced = ops.iter().rev().find_map(|op| {
         matches!(
@@ -470,16 +472,55 @@ fn float_lane_width(ops: &[PcodeOp]) -> Option<u32> {
         .then(|| op.output.as_ref().map(|v| v.size))
         .flatten()
     });
-    produced.or_else(|| {
-        ops.iter().rev().find_map(|op| {
-            matches!(
-                op.opcode,
-                O::FloatEqual | O::FloatNotEqual | O::FloatLess | O::FloatLessEqual | O::FloatNan
-            )
-            .then(|| op.inputs.first().map(|v| v.size))
-            .flatten()
+    produced
+        .or_else(|| {
+            ops.iter().rev().find_map(|op| {
+                matches!(
+                    op.opcode,
+                    O::FloatEqual
+                        | O::FloatNotEqual
+                        | O::FloatLess
+                        | O::FloatLessEqual
+                        | O::FloatNan
+                )
+                .then(|| op.inputs.first().map(|v| v.size))
+                .flatten()
+            })
         })
-    })
+        .or_else(|| {
+            ops.iter()
+                .any(|op| op.opcode == O::CallOther)
+                .then(|| float_userop_lane(mnemonic))
+                .flatten()
+        })
+}
+
+/// The element width of the x86 SSE/AVX float instructions Fission lifts to a
+/// user op that its evaluator computes (`dpps`, `roundsd`, `minps`, ...).
+fn float_userop_lane(mnemonic: &str) -> Option<u32> {
+    let m = mnemonic.strip_prefix('V').unwrap_or(mnemonic);
+    ["DP", "ROUND", "MIN", "MAX", "DIV", "SQRT", "RCP", "RSQRT"]
+        .iter()
+        .find_map(|family| match m.strip_prefix(family)? {
+            "PS" | "SS" => Some(4),
+            "PD" | "SD" => Some(8),
+            _ => None,
+        })
+}
+
+#[test]
+fn float_user_ops_have_the_width_of_their_mnemonic() {
+    for (mnemonic, width) in [
+        ("DPPS", Some(4)),
+        ("DPPD", Some(8)),
+        ("VROUNDSD", Some(8)),
+        ("RSQRTSS", Some(4)),
+        ("PMADDWD", None),
+        ("PMINSD", None),
+        ("MOVSD", None),
+    ] {
+        assert_eq!(float_userop_lane(mnemonic), width, "{mnemonic}");
+    }
 }
 
 // ── Baseline ────────────────────────────────────────────────────────────────
