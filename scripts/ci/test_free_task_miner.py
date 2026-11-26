@@ -1,8 +1,10 @@
+import json
 import os
 import tempfile
 import unittest
 from unittest import mock
 
+import free_model_draft as fmd
 import free_task_miner as ftm
 
 
@@ -175,7 +177,7 @@ class DedupTests(unittest.TestCase):
         with mock.patch.object(ftm, "gh_existing_issues", return_value=[]), \
                 mock.patch.object(ftm, "gh_create", return_value="9") as create, \
                 mock.patch.object(ftm, "gh_start_draft") as start:
-            ftm.main(["--root", root, "--create"])
+            ftm.main(["--root", root, "--create", "--no-rust-docs"])
         self.assertEqual(create.call_count, 1)
         start.assert_called_once_with("9")
 
@@ -185,15 +187,137 @@ class DedupTests(unittest.TestCase):
         issues = [{"number": 3, "body": ftm.render_body(group)}]
         with mock.patch.object(ftm, "gh_existing_issues", return_value=issues), \
                 mock.patch.object(ftm, "gh_create") as create:
-            ftm.main(["--root", root, "--create"])
+            ftm.main(["--root", root, "--create", "--no-rust-docs"])
         create.assert_not_called()
 
     def test_dry_run_creates_nothing(self):
         root = make_repo({"docs/a.md": "/Users/b/fission-benchmark/x\n"})
         with mock.patch.object(ftm, "gh_existing_issues", return_value=[]), \
                 mock.patch.object(ftm, "gh_create") as create:
-            ftm.main(["--root", root])
+            ftm.main(["--root", root, "--no-rust-docs"])
         create.assert_not_called()
+
+
+def cargo_msg(code, text, file="crates/c/src/lib.rs", line=7, src=None, message="missing documentation",
+              primary=True):
+    return json.dumps({
+        "reason": "compiler-message",
+        "target": {"src_path": "/work/" + (src or file)},
+        "message": {"message": message, "code": {"code": code},
+                    "spans": [{"file_name": file, "line_start": line, "is_primary": primary,
+                               "text": [{"text": text}]}]}})
+
+
+class RustDocTests(unittest.TestCase):
+    def test_missing_docs_keeps_file_line_and_item_header(self):
+        out = cargo_msg("missing_docs", "    pub fn new() -> Self {", line=9)
+        self.assertEqual(ftm.parse_cargo_messages(out, "c", "missing-docs"),
+                         [ftm.Finding("missing-docs", "crates/c/src/lib.rs", 9, "pub fn new() -> Self {", "")])
+
+    def test_only_the_crates_own_diagnostics_count(self):
+        out = "\n".join([
+            cargo_msg("missing_docs", "pub fn a()", file="crates/c/src/a.rs"),
+            cargo_msg("missing_docs", "pub fn dep()", file="crates/d/src/lib.rs"),  # dependency
+            cargo_msg("missing_docs", "pub fn mac()", file="crates/d/src/m.rs", src="crates/c/src/lib.rs"),  # expansion
+            cargo_msg("missing_docs", "pub fn other()", file="crates/cc/src/lib.rs"),  # prefix lookalike
+            cargo_msg("unused_variables", "let x", file="crates/c/src/a.rs"),
+            cargo_msg("missing_docs", "pub fn np()", primary=False),
+            "not json", json.dumps({"reason": "build-finished"})])
+        found = ftm.parse_cargo_messages(out, "c", "missing-docs")
+        self.assertEqual([x.before for x in found], ["pub fn a()"])
+
+    def test_identical_headers_keep_distinct_keys_that_ignore_lines(self):
+        out = "\n".join(cargo_msg("missing_docs", "pub fn new() -> Self {", line=n) for n in (5, 50))
+        a, b = ftm.parse_cargo_messages(out, "c", "missing-docs")
+        self.assertNotEqual(ftm.item_key(a), ftm.item_key(b))
+        shifted = "\n".join(cargo_msg("missing_docs", "pub fn new() -> Self {", line=n) for n in (9, 80))
+        c, d = ftm.parse_cargo_messages(shifted, "c", "missing-docs")
+        self.assertEqual((ftm.item_key(a), ftm.item_key(b)), (ftm.item_key(c), ftm.item_key(d)))
+
+    def test_rustdoc_keeps_only_rustdoc_lints_with_message_and_line(self):
+        out = "\n".join([
+            cargo_msg("rustdoc::broken_intra_doc_links", "/// see [`Gone`]", message="unresolved link to `Gone`"),
+            cargo_msg("rustdoc::bare_urls", "/// http://x.y", line=3, message="this URL is not a hyperlink"),
+            cargo_msg("missing_docs", "pub fn a()")])
+        found = ftm.parse_cargo_messages(out, "c", "rustdoc")
+        self.assertEqual([(x.line, x.before) for x in found],
+                         [(3, "this URL is not a hyperlink"), (7, "unresolved link to `Gone`")])
+        self.assertEqual({x.kind for x in found}, {"rustdoc"})
+
+    def test_rotation_is_by_day_and_wraps(self):
+        n = len(ftm.DOC_CRATES)
+        self.assertEqual(ftm.pick_doc_crate(0), ftm.DOC_CRATES[0])
+        self.assertEqual(ftm.pick_doc_crate(n + 1), ftm.DOC_CRATES[1])
+        self.assertEqual(len({ftm.pick_doc_crate(d) for d in range(1, 367)}), n)
+
+    def test_every_doc_crate_exists_in_the_workspace(self):
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        for crate in ftm.DOC_CRATES:
+            self.assertTrue(os.path.isfile(os.path.join(root, "crates", crate, "Cargo.toml")), crate)
+
+    def test_groups_hold_at_most_8_files_and_15_items(self):
+        many = [ftm.Finding("missing-docs", "crates/c/src/a.rs", n, f"pub fn f{n}()", "") for n in range(40)]
+        self.assertEqual([len(g) for g in ftm.group_findings(many)], [15, 15, 10])
+        spread = [ftm.Finding("rustdoc", f"crates/c/src/f{i}.rs", 1, "m", "t") for i in range(20)]
+        self.assertEqual([len({x.file for x in g}) for g in ftm.group_findings(spread)], [8, 8, 4])
+
+    def test_rust_bodies_carry_the_comment_only_marker_and_markdown_ones_do_not(self):
+        rust = [ftm.Finding("missing-docs", "crates/c/src/a.rs", 3, "pub fn f()", "")]
+        body = ftm.render_body(rust)
+        self.assertIn(ftm.COMMENT_ONLY_MARKER, body)
+        self.assertIn("- `crates/c/src/a.rs:3`: `pub fn f()`", body)
+        self.assertIn("docs(c): document public items (1 in 1 file)", ftm.render_title(rust))
+        self.assertNotIn(ftm.COMMENT_ONLY_MARKER, ftm.render_body([f(1)]))
+
+    def test_source_text_with_backticks_stays_valid_markdown(self):
+        item = ftm.Finding("rustdoc", "crates/c/a.rs", 1, "unresolved link", "/// see [`X`]")
+        self.assertIn("`` /// see [`X`] ``", ftm.render_body([item]))
+
+    def test_the_marker_is_the_one_the_draft_script_looks_for(self):
+        self.assertEqual(ftm.COMMENT_ONLY_MARKER, fmd.COMMENT_ONLY_MARKER)
+        body = ftm.render_body([ftm.Finding("rustdoc", "crates/c/a.rs", 1, "m", "t")])
+        self.assertTrue(fmd.is_comment_only({"body": body}))
+
+    def test_the_cap_is_shared_and_kinds_take_turns(self):
+        docs = [ftm.Finding("missing-docs", f"crates/c/src/f{n}.rs", 1, "pub fn a()", "") for n in range(100)]
+        lint = [ftm.Finding("rustdoc", "crates/c/src/z.rs", 1, "m", "t")]
+        chosen = ftm.plan(docs + lint + [f(1)], set(), 3)
+        self.assertEqual([g[0].kind for g in chosen], ["home-path", "missing-docs", "rustdoc"])
+        self.assertEqual(len(ftm.plan(docs, set(), 3)), 3)
+
+    def test_main_runs_the_rust_detectors_for_the_chosen_crate_without_creating(self):
+        root = make_repo({"docs/a.md": "ok\n"})
+        item = ftm.Finding("missing-docs", "crates/c/src/a.rs", 3, "pub fn f()", "")
+        with mock.patch.object(ftm, "gh_existing_issues", return_value=[]), \
+                mock.patch.object(ftm, "gh_create") as create, \
+                mock.patch.object(ftm, "detect_missing_docs", return_value=[item]) as md, \
+                mock.patch.object(ftm, "detect_rustdoc_lints", return_value=[]) as rd:
+            ftm.main(["--root", root, "--doc-crate", "c"])
+        md.assert_called_once_with(root, "c")
+        rd.assert_called_once_with(root, "c")
+        create.assert_not_called()
+
+    def test_cargo_commands_are_scoped_to_one_crate_and_get_no_token(self):
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append((cmd, kw))
+            return mock.Mock(stdout="", stderr="", returncode=0)
+
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "t", "GITHUB_TOKEN": "t"}), \
+                mock.patch.object(ftm.subprocess, "run", fake_run):
+            ftm.detect_missing_docs(".", "c")
+            ftm.detect_rustdoc_lints(".", "c")
+        self.assertEqual(calls[0][0][:6], ["cargo", "rustc", "--locked", "-p", "c", "--lib"])
+        self.assertEqual(calls[0][0][-3:], ["--", "-W", "missing_docs"])
+        self.assertEqual(calls[1][0][:5], ["cargo", "doc", "--locked", "--no-deps", "-p"])
+        for _cmd, kw in calls:
+            self.assertNotIn("GH_TOKEN", kw["env"])
+            self.assertNotIn("GITHUB_TOKEN", kw["env"])
+
+    def test_a_failed_cargo_run_yields_nothing_instead_of_raising(self):
+        with mock.patch.object(ftm.subprocess, "run", side_effect=OSError("no cargo")):
+            self.assertEqual(ftm.detect_missing_docs(".", "c"), [])
 
 
 if __name__ == "__main__":

@@ -14,7 +14,10 @@ name: Free-model draft
 #   non-interactive run a permission request is rejected.
 # - Edits: kept only under docs/, in Markdown and in Rust under crates/;
 #   small; text-only; no workflow, script or build file; nothing in a
-#   proc-macro crate (cargo check would run it). The check runs again in the
+#   proc-macro crate (cargo check would run it). An issue with the hidden
+#   `free-task-kind:comment-only` marker (the miner's Rust docs tasks) is
+#   stricter: every added or removed line in a .rs file must be a comment or
+#   blank, so the model cannot change logic. The check runs again in the
 #   job that opens the PR.
 # - Build-error repair loop (scripts/ci/free_model_draft_loop.sh): when the
 #   edits touch Rust under crates/, the workflow, not the model, runs
@@ -161,7 +164,8 @@ jobs:
           set -euo pipefail
           [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::issue must be a number"; exit 1; }
           git apply --index "$RUNNER_TEMP/draft/edits.patch"
-          python3 scripts/ci/free_model_draft.py check
+          gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json body > "$RUNNER_TEMP/issue-body.json"
+          python3 scripts/ci/free_model_draft.py check --issue-json "$RUNNER_TEMP/issue-body.json"
           branch="agent-free/issue-$ISSUE-$GITHUB_RUN_ID"
           git switch -c "$branch"
           git -c user.name="github-actions[bot]" \

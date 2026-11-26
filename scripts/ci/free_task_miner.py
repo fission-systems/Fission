@@ -13,11 +13,22 @@ Detectors (each yields a finding only when the fix is determinable):
   broken-link  a relative Markdown link whose target is missing but whose basename
                exists exactly once elsewhere in the repo. Ambiguous or missing
                targets are skipped.
+  missing-docs a public Rust item without a `///` comment, from the `missing_docs`
+               warnings of one crate. The fix needs writing, but it is a comment only.
+  rustdoc      a rustdoc lint warning of that crate (`rustdoc::broken_intra_doc_links`,
+               `rustdoc::invalid_html_tags`, `rustdoc::bare_urls`, ...).
 
-Findings are grouped per kind into issues of at most 12 files and 40 replacements.
-Each body carries one hidden `<!-- free-task-item:<16 hex> -->` key per finding (a hash
-of kind, file, before, after; no line number). Findings whose key already appears in any
-issue labelled agent:free (open or closed) are dropped before grouping.
+The two Rust detectors run on ONE crate per run, picked from DOC_CRATES by day of
+year, so a run stays bounded. Their issues carry the hidden marker
+`<!-- free-task-kind:comment-only -->`; free_model_draft.py then refuses any edit that
+adds or removes a Rust line that is not a comment, so the model cannot change logic.
+
+Findings are grouped per kind into issues (MAX_GROUP: 12 files and 40 replacements for
+the Markdown kinds, 8 files and 15 items for the Rust kinds). Each body carries one
+hidden `<!-- free-task-item:<16 hex> -->` key per finding (a hash of kind, file, before,
+after; no line number). Findings whose key already appears in any issue labelled
+agent:free (open or closed) are dropped before grouping. `--max-issues` caps the total
+across kinds; kinds take turns, so one cannot starve another.
 
 Default mode is a dry run. `--create` files the issues with `gh` (labels agent:free
 and area:docs) and starts `free-model-draft.yml` for each, because issues created
@@ -25,6 +36,7 @@ with GITHUB_TOKEN do not trigger workflows.
 """
 
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -38,6 +50,22 @@ Finding = namedtuple("Finding", "kind file line before after")
 
 MAX_FILES = 12
 MAX_REPLACEMENTS = 40
+# kind -> (files, items) per issue, when it differs: the model has to write each
+# Rust item's text, so these groups are smaller.
+MAX_GROUP = {"missing-docs": (8, 15), "rustdoc": (8, 15)}
+COMMENT_ONLY_MARKER = "<!-- free-task-kind:comment-only -->"
+
+# Crates (directory names under crates/; the package name is the same) whose Rust
+# docs are mined, one per run: DOC_CRATES[day of year % len]. Small, with few
+# workspace dependencies, so a cold build stays cheap. Counts of missing_docs
+# warnings when chosen (2026-11): analysis-protocol 34, ttd 30, cspec 43, plugin 4,
+# project 74, evidence 128, signatures 189, pcode-ir 221, core 268. Left out on
+# purpose: crates with their own AGENTS.md (solver, analysis-db) and the
+# decompiler core. Append more once these are documented.
+DOC_CRATES = ("fission-analysis-protocol", "fission-ttd", "fission-cspec", "fission-plugin",
+              "fission-project", "fission-evidence", "fission-signatures", "fission-pcode-ir",
+              "fission-core")
+CARGO_TIMEOUT = 1500  # seconds, per cargo command
 
 # Excluded from every detector (a top-level `target*` dir is excluded too).
 EXCLUDED_DIRS = ("docs/reports/", "docs/validation/", "docs/audits/", "docs/changelog/",
@@ -187,20 +215,117 @@ def detect_broken_links(root, files):
     return findings
 
 
-def mine(root):
+def pick_doc_crate(day_of_year):
+    """The crate whose Rust docs this run mines: one per day, rotating through DOC_CRATES."""
+    return DOC_CRATES[day_of_year % len(DOC_CRATES)]
+
+
+def _clip(text, limit=120):
+    """One source line, whitespace collapsed and cut to `limit` characters."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def code_span(text):
+    """Inline Markdown code; double backticks when the text holds a backtick itself."""
+    return f"`` {text} ``" if "`" in text else f"`{text}`"
+
+
+def parse_cargo_messages(output, crate, kind):
+    """Findings of `kind` in cargo's `--message-format=json` output, for `crate` only.
+
+    A compiler message counts only when its target's `src_path` and its primary span
+    are both under `crates/<crate>/` (a path dependency's warnings, or an expansion
+    into another file, are ignored). `missing-docs` keeps `missing_docs` warnings as
+    (item header line, "" or "#n" for the n-th identical header in a file);
+    `rustdoc` keeps `rustdoc::*` lints as (message, source line).
+    """
+    prefix = f"crates/{crate}/"
+    found = []
+    for raw in output.splitlines():
+        try:
+            msg = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(msg, dict) or msg.get("reason") != "compiler-message":
+            continue
+        src = str((msg.get("target") or {}).get("src_path", "")).replace(os.sep, "/")
+        if f"/{prefix}" not in f"/{src}":
+            continue
+        diag = msg.get("message") or {}
+        code = (diag.get("code") or {}).get("code") or ""
+        wanted = code == "missing_docs" if kind == "missing-docs" else code.startswith("rustdoc::")
+        if not wanted:
+            continue
+        spans = [s for s in diag.get("spans", []) if s.get("is_primary")]
+        if not spans or not str(spans[0].get("file_name", "")).startswith(prefix):
+            continue
+        span = spans[0]
+        text = _clip(((span.get("text") or [{}])[0]).get("text", ""))
+        if kind == "missing-docs":
+            found.append(Finding(kind, span["file_name"], span["line_start"], text, ""))
+        else:
+            found.append(Finding(kind, span["file_name"], span["line_start"],
+                                 _clip(diag.get("message", ""), 200), text))
+    found.sort(key=lambda f: (f.file, f.line, f.before, f.after))
+    # Identical headers in one file (two `pub fn new() -> Self`) must keep distinct keys.
+    seen, result = {}, []
+    for f in found:
+        if f.kind == "missing-docs":
+            n = seen[(f.file, f.before)] = seen.get((f.file, f.before), 0) + 1
+            f = f._replace(after=f"#{n}" if n > 1 else "")
+        result.append(f)
+    return list(dict.fromkeys(result))
+
+
+def run_cargo(root, args, crate, kind):
+    """Run one cargo command and parse it; a failed build is reported, never fatal."""
+    # Build scripts of dependencies run here: they get no GitHub token.
+    env = {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
+    try:
+        proc = subprocess.run(["cargo", *args], cwd=root, capture_output=True, text=True, env=env,
+                              timeout=CARGO_TIMEOUT, errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as err:
+        print(f"::warning::{kind} detector skipped for {crate}: {err}", file=sys.stderr)
+        return []
+    found = parse_cargo_messages(proc.stdout, crate, kind)
+    if proc.returncode != 0 and not found:
+        print(f"::warning::cargo failed for {crate} ({kind}): {proc.stderr.strip()[-300:]}",
+              file=sys.stderr)
+    return found
+
+
+def detect_missing_docs(root, crate):
+    # `cargo rustc ... -- -W missing_docs` passes the lint to this crate's own
+    # compilation only. RUSTFLAGS would change the flags of every dependency and
+    # rebuild the whole tree; this rebuilds one crate and reuses cached dependencies.
+    # Only the library target: binaries have no public API to document.
+    return run_cargo(root, ["rustc", "--locked", "-p", crate, "--lib", "--message-format=json",
+                            "--", "-W", "missing_docs"], crate, "missing-docs")
+
+
+def detect_rustdoc_lints(root, crate):
+    return run_cargo(root, ["doc", "--locked", "--no-deps", "-p", crate,
+                            "--message-format=json"], crate, "rustdoc")
+
+
+def mine(root, doc_crate=None):
     files = list_files(root)
     found = detect_home_paths(root, files) + detect_broken_links(root, files)
+    if doc_crate:
+        found += detect_missing_docs(root, doc_crate) + detect_rustdoc_lints(root, doc_crate)
     return sorted(set(found), key=lambda f: (f.kind, f.file, f.line, f.before))
 
 
 def group_findings(findings):
-    """Per kind, groups of at most MAX_FILES files and MAX_REPLACEMENTS findings."""
+    """Per kind, groups of at most MAX_GROUP[kind] (files, findings); default 12 and 40."""
     groups = []
     for kind in sorted({f.kind for f in findings}):
+        max_files, max_items = MAX_GROUP.get(kind, (MAX_FILES, MAX_REPLACEMENTS))
         current, names = [], set()
         for f in sorted(x for x in findings if x.kind == kind):
-            if current and (len(current) >= MAX_REPLACEMENTS
-                            or (f.file not in names and len(names) >= MAX_FILES)):
+            if current and (len(current) >= max_items
+                            or (f.file not in names and len(names) >= max_files)):
                 groups.append(current)
                 current, names = [], set()
             current.append(f)
@@ -225,23 +350,68 @@ def fingerprint(group):
 ITEM_MARKER_RE = re.compile(r"<!-- free-task-item:([0-9a-f]{16}) -->")
 
 TITLES = {"home-path": "docs: replace absolute home paths with portable paths",
-          "broken-link": "docs: fix broken relative Markdown links"}
+          "broken-link": "docs: fix broken relative Markdown links",
+          "missing-docs": "docs({crate}): document public items",
+          "rustdoc": "docs({crate}): fix rustdoc warnings"}
 INTROS = {"home-path": "Replace each absolute home-directory path below with the given portable path.",
           "broken-link": "Each link target below does not exist, but the file exists exactly once "
-                         "elsewhere in the repo. Replace the link target and keep the link text."}
+                         "elsewhere in the repo. Replace the link target and keep the link text.",
+          "missing-docs": "Each public item below has no doc comment (`missing_docs` warning). Add "
+                          "a `///` doc comment to each one, in the file and above the item at the "
+                          "line given.",
+          "rustdoc": "Each doc comment below makes `cargo doc` print a rustdoc warning. Fix only "
+                     "those doc comments so the warning goes away."}
+_RULES_HEAD = ["Rules (these edits are checked mechanically: any added or removed Rust line that is "
+               "not a comment makes the whole draft be refused):",
+               "- Change comments only. Do not change, add, remove, move or reformat any code, "
+               "attribute, import or string."]
+_RULES_TAIL = ["- Do not add code blocks or examples to doc comments (they would run as doctests).",
+               "- Touch only the listed items."]
+RUST_RULES = {
+    "missing-docs": _RULES_HEAD + [
+        "- Describe only what the code visibly does, in one or two plain sentences. Do not "
+        "invent guarantees, invariants, units, panics, performance or history. If you "
+        "cannot tell what an item is for from its code, write the shortest accurate "
+        "description or leave it."] + _RULES_TAIL,
+    "rustdoc": _RULES_HEAD + [
+        "- Change the smallest part of the comment: fix the link or the tag, keep the rest of "
+        "the wording. For an unresolved link, point it at the item's real path if you can see "
+        "it in the code, otherwise turn it into plain code text without brackets. Escape or "
+        "wrap in backticks a stray `<tag>` or bare URL."] + _RULES_TAIL,
+}
+
+
+def crate_of(group):
+    parts = group[0].file.split("/")
+    return parts[1] if parts[0] == "crates" and len(parts) > 2 else "workspace"
 
 
 def render_title(group):
     n, files = len(group), len({f.file for f in group})
-    return f"{TITLES[group[0].kind]} ({n} in {files} file{'s' if files != 1 else ''})"
+    title = TITLES[group[0].kind].format(crate=crate_of(group))
+    return f"{title} ({n} in {files} file{'s' if files != 1 else ''})"
+
+
+def render_item(f):
+    if f.kind == "missing-docs":
+        return f"- `{f.file}:{f.line}`: {code_span(f.before)}"
+    if f.kind == "rustdoc":
+        return f"- `{f.file}:{f.line}`: {f.before}: {code_span(f.after)}"
+    return f"- `{f.file}:{f.line}`: `{f.before}` → `{f.after}`"
 
 
 def render_body(group):
-    lines = [INTROS[group[0].kind], "",
-             "Edit only the listed lines in these Markdown files; change nothing else.", ""]
+    kind = group[0].kind
+    if kind in MAX_GROUP:
+        lines = [INTROS[kind], ""] + RUST_RULES[kind] + [""]
+    else:
+        lines = [INTROS[kind], "",
+                 "Edit only the listed lines in these Markdown files; change nothing else.", ""]
     for f in sorted(group):
-        lines.append(f"- `{f.file}:{f.line}`: `{f.before}` → `{f.after}`")
+        lines.append(render_item(f))
     lines += ["", "Found by `scripts/ci/free_task_miner.py`.", ""]
+    if kind in MAX_GROUP:
+        lines += [COMMENT_ONLY_MARKER]
     lines += [f"<!-- free-task-item:{item_key(f)} -->" for f in sorted(group)]
     lines.append(f"<!-- free-task:{fingerprint(group)} -->")
     return "\n".join(lines) + "\n"
@@ -257,7 +427,18 @@ def known_markers(issues):
 def plan(findings, markers, max_issues):
     """Drop already-filed findings, then group the rest and cap the issue count."""
     fresh = [f for f in findings if item_key(f) not in markers]
-    return group_findings(fresh)[:max_issues]
+    # Take turns between kinds, so that one kind's many groups cannot use the whole cap.
+    by_kind = {}
+    for group in group_findings(fresh):
+        by_kind.setdefault(group[0].kind, []).append(group)
+    chosen = []
+    while by_kind and len(chosen) < max_issues:
+        for kind in sorted(by_kind):
+            if len(chosen) < max_issues:
+                chosen.append(by_kind[kind].pop(0))
+            if not by_kind[kind]:
+                del by_kind[kind]
+    return chosen
 
 
 def gh_existing_issues():
@@ -285,15 +466,23 @@ def gh_start_draft(number):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="File mechanical docs fixes as before -> after issues.")
     ap.add_argument("--root", default=".")
-    ap.add_argument("--max-issues", type=int, default=3)
+    ap.add_argument("--max-issues", type=int, default=3, help="total across all kinds")
+    ap.add_argument("--doc-crate", help="crate to mine for Rust docs (default: by day of year)")
+    ap.add_argument("--no-rust-docs", action="store_true", help="skip the cargo-based detectors")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="print what would be filed (default)")
     mode.add_argument("--create", action="store_true", help="file the issues with gh")
     args = ap.parse_args(argv)
 
-    findings = mine(args.root)
+    doc_crate = None
+    if not args.no_rust_docs:
+        doc_crate = args.doc_crate or pick_doc_crate(datetime.date.today().timetuple().tm_yday)
+        print(f"Rust docs crate: {doc_crate}")
+    findings = mine(args.root, doc_crate)
     groups = group_findings(findings)
-    print(f"{len(findings)} findings in {len(groups)} groups")
+    print(f"{len(findings)} findings in {len(groups)} groups: "
+          + ", ".join(f"{k} {sum(1 for f in findings if f.kind == k)}"
+                      for k in sorted({f.kind for f in findings})))
     try:
         markers = known_markers(gh_existing_issues())
     except (OSError, subprocess.CalledProcessError):
