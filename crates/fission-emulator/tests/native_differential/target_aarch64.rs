@@ -162,11 +162,24 @@ const CURATED: &[(&str, &[u8])] = &[
     ("ldtrsb w0, [x1, #8]", &[0x20, 0x88, 0xc0, 0x38]),
     ("ld1 {v1.4h, v2.4h}, [x1]", &[0x21, 0xa4, 0x40, 0x0c]),
     ("ld1r {v3.4h}, [x1]", &[0x23, 0xc4, 0x40, 0x0d]),
+    // W-form results of CAS, CASP and LDAPR zero bits 63:32 (#1067).
+    ("casb w2, w3, [x1]", &[0x23, 0x7c, 0xa2, 0x08]),
+    ("cash w2, w3, [x1]", &[0x23, 0x7c, 0xa2, 0x48]),
+    ("cas w2, w3, [x1]", &[0x23, 0x7c, 0xa2, 0x88]),
+    ("casal w2, w3, [x1]", &[0x23, 0xfc, 0xe2, 0x88]),
+    ("casp w2, w3, w4, w5, [x1]", &[0x24, 0x7c, 0x22, 0x08]),
+    ("casp x2, x3, x4, x5, [x1]", &[0x24, 0x7c, 0x22, 0x48]),
+    ("ldapr w3, [x1]", &[0x23, 0xc0, 0xbf, 0xb8]),
+    ("ldaprb w3, [x1]", &[0x23, 0xc0, 0xbf, 0x38]),
+    ("ldaprh w3, [x1]", &[0x23, 0xc0, 0xbf, 0x78]),
     ("sqrdmulh v0.4h, v1.4h, v2.h[7]", &[0x20, 0xd8, 0x72, 0x0f]),
     ("srsra v0.4h, v1.4h, #1", &[0x20, 0x34, 0x1f, 0x0f]),
     ("sqdmlal v0.2d, v1.2s, v2.s[3]", &[0x20, 0x38, 0xa2, 0x0f]),
     ("suqadd v0.8b, v1.8b", &[0x20, 0x38, 0x20, 0x0e]),
     ("frint32z s0, s1", &[0x20, 0x40, 0x28, 0x1e]),
+    ("frint32x s0, s1", &[0x20, 0xc0, 0x28, 0x1e]),
+    ("frint64z d0, d1", &[0x20, 0x40, 0x69, 0x1e]),
+    ("frint64z s0, s1", &[0x20, 0x40, 0x29, 0x1e]),
     ("ldlarh w6, [x1]", &[0x26, 0x54, 0xde, 0x48]),
     ("ldrsb w0, [x1]", &[0x20, 0x00, 0xc0, 0x39]),
     ("ldrsb w0, [x1, #5]", &[0x20, 0x14, 0xc0, 0x39]),
@@ -252,6 +265,11 @@ const CURATED: &[(&str, &[u8])] = &[
     ("fmax s0, s1, s2", &[0x20, 0x48, 0x22, 0x1e]),
     ("fminnm d0, d1, d2", &[0x20, 0x78, 0x62, 0x1e]),
     ("fmaxnm s0, s1, s2", &[0x20, 0x68, 0x22, 0x1e]),
+    // The destination is also an operand: upstream wrote Rd before comparing (#1063).
+    ("fmax d0, d1, d0", &[0x20, 0x48, 0x60, 0x1e]),
+    ("fmin s2, s1, s2", &[0x22, 0x58, 0x22, 0x1e]),
+    ("fmaxnm d0, d1, d0", &[0x20, 0x68, 0x60, 0x1e]),
+    ("fminnm s0, s1, s2", &[0x20, 0x78, 0x22, 0x1e]),
     ("fmin v0.4s, v1.4s, v2.4s", &[0x20, 0xf4, 0xa2, 0x4e]),
     ("fmax v0.2d, v1.2d, v2.2d", &[0x20, 0xf4, 0x62, 0x4e]),
     ("fminnm v0.4s, v1.4s, v2.4s", &[0x20, 0xc4, 0xa2, 0x4e]),
@@ -396,6 +414,28 @@ fn state(rng: &mut Rng, curated: Option<&str>) -> CpuState {
     rng.fill(&mut s.buf);
     if let Some(name) = curated {
         s.gpr[X1] = buffer_pointer(rng, 16);
+        // A compare-and-swap only stores when the comparison holds, which random
+        // registers almost never do: make them match memory half the time.
+        if name.starts_with("cas") && rng.chance(50) {
+            let off = (s.gpr[X1] - buf_addr()) as usize;
+            let word = |at: usize, n: usize| {
+                let mut b = [0u8; 8];
+                b[..n].copy_from_slice(&s.buf[off + at..off + at + n]);
+                u64::from_le_bytes(b)
+            };
+            let size = match name {
+                n if n.starts_with("casp x") => 8,
+                n if n.starts_with("casb") => 1,
+                n if n.starts_with("cash") => 2,
+                _ => 4,
+            };
+            let first = word(0, size);
+            let second = name.starts_with("casp").then(|| word(size, size));
+            s.gpr[2] = first;
+            if let Some(second) = second {
+                s.gpr[3] = second;
+            }
+        }
         // Rounding instructions get a halfway input half the time: ties are
         // where the rounding modes differ, and a random float is almost never one.
         if (name.starts_with("frint") || name.starts_with("fcvt")) && rng.chance(50) {

@@ -72,6 +72,23 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `floor` for M, `ceil` for P, `round` for A/I/N/X (approximations: no ties-to-even or
   ties-away, FPCR mode not modelled) and `int2float(trunc(x))` for Z (loses precision for
   magnitudes at or above 2^63). Re-apply with `scripts/sleigh/apply_aarch64_frint_rounding.py`.
+  Then `scripts/sleigh/apply_aarch64_frint_exact.py` makes N, I, X and Z exact (#1064):
+  ties to even for N and for I/X (FPCR.RMode = round to nearest, the default; other modes are
+  not modelled), built from `floor`, the exact fraction `x - floor(x)` and an evenness test,
+  and toward zero as `ceil` for negative and `floor` for positive operands, so -0.0 and
+  magnitudes at or above 2^63 survive. A stays `round` (ties away from zero). It also gives
+  FRINT32Z/FRINT32X/FRINT64Z/FRINT64X their FPRoundIntN semantics (the same roundings, and
+  the most negative N-bit integer for a NaN, an infinity or an out-of-range result), with
+  the rest of the register zeroed; upstream lifted them as `trunc`, integer bits (#1070).
+  Evidence: an Apple M4 run natively (the native differential).
+- `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
+  `FMAX`/`FMIN`/`FMAXNM`/`FMINNM` (H, S, D) follow FPMax/FPMin/FPMaxNum/FPMinNum. Upstream
+  copied Rn into Rd before comparing, so with Rd = Rm (`fmax d0, d1, d0`) the result was
+  always Rn; it ignored a NaN in Rn (FMAX/FMIN must return a NaN) and returned a lone quiet
+  NaN from FMAXNM (it must return the number), and FMINNM was the userop `NEON_fminnm`. They
+  now copy both operands first, process NaNs as FPProcessNaNs does (signalling first, then
+  op1, quieted), and combine the signs of two zeros (#1063, native evidence). Re-apply with
+  `scripts/sleigh/apply_aarch64_fmax_fmin_scalar.py`.
 - `AARCH64/AARCH64base.sinc` (and the three compiled `AARCH64*.sla`): the sign-extending byte
   and halfword loads into a `W` register (`ldrsb`/`ldrsh` in every addressing form,
   `ldursb`/`ldursh`, `ldtrsb`/`ldtrsh`) sign-extend to 32 bits and zero bits 63:32, as the
@@ -81,6 +98,27 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `local tmp:4 = sext(*:N addr); Rt_GPR64 = zext(tmp);`; the `X` forms, `ldrsw` and
   `ldapursb`/`ldapursh` were already right. Re-apply with
   `scripts/sleigh/apply_aarch64_w_signed_loads.py`. Upstream: NationalSecurityAgency/ghidra#6471.
+- `AARCH64/AARCH64base.sinc` (and the three compiled `AARCH64*.sla`): writes to a `W`
+  register zero bits 63:32 of `X` (Arm ARM: the `X[]` setter stores `ZeroExtend(value, 64)`)
+  in the forms upstream wrote as a bare `W` assignment, which kept the old upper half: the
+  LSE atomics `LD{ADD,CLR,EOR,SET,SMAX,SMIN,UMAX,UMIN}` and `SWP` (byte, halfword and word,
+  every ordering), `LDLARB`/`LDLARH`/`LDLAR`, `LDAPRB`/`LDAPRH`/`LDAPR` and `CAS`/`CASP`
+  with `W` registers. Each now assigns `zext(...)` to the `X` register. `CASP`'s pair
+  registers are still mis-indexed by Fission's runtime (a dropped `attach variables` hole,
+  fission-systems/Fission#1391), so the differential cannot confirm its `W` form yet.
+  Evidence: an Apple M4 run natively (the native differential, fission-systems/Fission#1067
+  and #1057).
+  Re-apply with `scripts/sleigh/apply_aarch64_w_dest_zero_extend.py`.
+  The same file compares the byte and halfword `LDSMAX`/`LDSMIN`/`LDUMAX`/`LDUMIN` at the
+  element width (`Max(SInt(data), SInt(value))` over 8 or 16 bits); upstream compared the
+  loaded element with the whole 32-bit `Ws`, so the stored maximum could be the register's
+  low byte (#1069). Re-apply with `scripts/sleigh/apply_aarch64_lse_minmax_width.py`.
+- `AARCH64/AARCH64ldst.sinc` (and the three compiled `AARCH64*.sla`): `LD1`..`LD4` and
+  `LD1R`..`LD4R` with a 64-bit arrangement (`.8B/.4H/.2S/.1D`) zero bits 127:64 (and the SVE
+  upper bits) of every destination, as `V[t, 64] = rval` does; upstream left them, marked
+  `# neglected zexts`. The 41 constructors now call `zext_zd`, as the spec's other 64-bit
+  SIMD results do (#1067, native evidence). Re-apply with
+  `scripts/sleigh/apply_aarch64_ld_vpr64_zero_upper.py`.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 

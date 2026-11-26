@@ -1286,18 +1286,20 @@ pub(super) mod tests {
 
     #[test]
     fn aarch64_frint_rounds_to_a_float_not_to_an_integer() {
-        use PcodeOpcode::{FloatCeil, FloatFloor, FloatInt2Float, FloatRound, FloatTrunc};
+        use PcodeOpcode::{FloatCeil, FloatFloor, FloatRound};
         // `frint<mode> s0, s0`. FRINT rounds to an integral *float*; upstream lifted
-        // every mode to FLOAT_TRUNC, a float-to-integer conversion.
+        // every mode to FLOAT_TRUNC, a float-to-integer conversion. Ties to even
+        // (N, and I/X under the default FPCR) is built from floor(x) and an
+        // evenness test on floor(floor(x) / 2); toward zero picks ceil or floor
+        // by the sign, so no mode goes through an integer (#1064).
         let cases: [(&str, u32, &[PcodeOpcode]); 7] = [
             ("frintm s0, s0", 0x1e25_4000, &[FloatFloor]),
             ("frintp s0, s0", 0x1e24_c000, &[FloatCeil]),
-            ("frintn s0, s0", 0x1e24_4000, &[FloatRound]),
+            ("frintn s0, s0", 0x1e24_4000, &[FloatFloor, FloatFloor]),
             ("frinta s0, s0", 0x1e26_4000, &[FloatRound]),
-            ("frinti s0, s0", 0x1e27_c000, &[FloatRound]),
-            ("frintx s0, s0", 0x1e27_4000, &[FloatRound]),
-            // toward zero has no float-to-float operation: through an integer
-            ("frintz s0, s0", 0x1e25_c000, &[FloatTrunc, FloatInt2Float]),
+            ("frinti s0, s0", 0x1e27_c000, &[FloatFloor, FloatFloor]),
+            ("frintx s0, s0", 0x1e27_4000, &[FloatFloor, FloatFloor]),
+            ("frintz s0, s0", 0x1e25_c000, &[FloatFloor, FloatCeil]),
         ];
         for (name, word, expected) in cases {
             assert_eq!(aarch64_float_ops(word), expected, "{name} ({word:#010x})");
@@ -1306,7 +1308,7 @@ pub(super) mod tests {
 
     #[test]
     fn aarch64_frint_vector_rounds_every_lane() {
-        use PcodeOpcode::{FloatCeil, FloatFloor, FloatTrunc};
+        use PcodeOpcode::{FloatCeil, FloatFloor};
         // `frintm v0.4s, v0.4s`, `frintp v0.4s, v0.4s`, `frintz v0.4s, v0.4s`.
         assert_eq!(
             aarch64_float_ops(0x4e21_9800),
@@ -1318,11 +1320,10 @@ pub(super) mod tests {
             [FloatCeil; 4],
             "frintp v0.4s"
         );
-        let z = aarch64_float_ops(0x4ea1_9800);
         assert_eq!(
-            z.iter().filter(|op| **op == FloatTrunc).count(),
-            4,
-            "frintz v0.4s: {z:?}"
+            aarch64_float_ops(0x4ea1_9800),
+            [FloatFloor, FloatCeil].repeat(4),
+            "frintz v0.4s"
         );
     }
 
