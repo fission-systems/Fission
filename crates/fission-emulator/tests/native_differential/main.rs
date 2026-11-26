@@ -293,9 +293,9 @@ impl<'a> Harness<'a> {
                     stats.random_mnemonics.insert(mn.clone());
                 }
                 let mask = (self.target.mask)(bytes, &lifted, input);
-                let half = half_precision(&lifted.ops);
-                let mut diffs = model::compare(self.target.isa, mask, half, input, &n, &f);
-                if half {
+                let lane = float_lane_width(&lifted.ops);
+                let mut diffs = model::compare(self.target.isa, mask, lane, input, &n, &f);
+                if half_precision(&lifted.ops) {
                     for d in &mut diffs {
                         d.field.push_str("~fp16");
                     }
@@ -442,6 +442,43 @@ fn half_precision(ops: &[PcodeOp]) -> bool {
                 | O::FloatNan
         ) && (op.output.as_ref().is_some_and(|v| v.size == 2)
             || op.inputs.iter().any(|v| v.size == 2))
+    })
+}
+
+/// The byte width of the float elements an instruction produces: the output of
+/// its last value-producing float op (a widening lift ends on the wide format,
+/// a narrowing one on the narrow format). A lift that only compares floats and
+/// selects bits (FMAX, MINSS) has the width it compares. `None` without any.
+fn float_lane_width(ops: &[PcodeOp]) -> Option<u32> {
+    use fission_pcode_ir::ir::PcodeOpcode as O;
+    let produced = ops.iter().rev().find_map(|op| {
+        matches!(
+            op.opcode,
+            O::FloatAdd
+                | O::FloatSub
+                | O::FloatMult
+                | O::FloatDiv
+                | O::FloatNeg
+                | O::FloatAbs
+                | O::FloatSqrt
+                | O::FloatFloat2Float
+                | O::FloatInt2Float
+                | O::FloatCeil
+                | O::FloatFloor
+                | O::FloatRound
+        )
+        .then(|| op.output.as_ref().map(|v| v.size))
+        .flatten()
+    });
+    produced.or_else(|| {
+        ops.iter().rev().find_map(|op| {
+            matches!(
+                op.opcode,
+                O::FloatEqual | O::FloatNotEqual | O::FloatLess | O::FloatLessEqual | O::FloatNan
+            )
+            .then(|| op.inputs.first().map(|v| v.size))
+            .flatten()
+        })
     })
 }
 

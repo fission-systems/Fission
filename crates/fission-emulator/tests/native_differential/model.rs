@@ -79,13 +79,13 @@ fn hex16(v: &[u8; 16]) -> String {
     format!("{:032x}", u128::from_le_bytes(*v))
 }
 
-/// Every unmasked difference between the two final states. `half` says the
-/// instruction computes on half-precision floats, so vector lanes may also be
-/// compared as f16 NaNs.
+/// Every unmasked difference between the two final states. `float_lane` is
+/// the byte width of the float elements the instruction produces, if it does
+/// any float work: only then can a vector difference be a NaN payload.
 pub fn compare(
     isa: &Isa,
     mask: Mask,
-    half: bool,
+    float_lane: Option<u32>,
     input: &CpuState,
     native: &CpuState,
     fission: &CpuState,
@@ -122,11 +122,9 @@ pub fn compare(
             // Both sides produced a NaN and only the payload differs: kept
             // apart, because which NaN propagates is one evaluator question
             // (#1055), not a defect of each instruction.
-            let suffix = if nan_payload_only(&native.vec[i], &fission.vec[i], half) {
-                "~nan"
-            } else {
-                ""
-            };
+            let nan_only =
+                float_lane.is_some_and(|w| nan_payload_only(&native.vec[i], &fission.vec[i], w));
+            let suffix = if nan_only { "~nan" } else { "" };
             out.push(FieldDiff {
                 field: format!("{name}{suffix}"),
                 input: hex16(&input.vec[i]),
@@ -160,27 +158,73 @@ pub fn compare(
     out
 }
 
-/// Whether every differing lane, read as f32 lanes or as f64 lanes (or as f16
-/// lanes, for a half-precision instruction), holds a NaN on both sides.
-fn nan_payload_only(a: &[u8; 16], b: &[u8; 16], half: bool) -> bool {
-    let f32_lanes = (0..4).all(|l| {
-        let x = u32::from_le_bytes(a[4 * l..4 * l + 4].try_into().unwrap());
-        let y = u32::from_le_bytes(b[4 * l..4 * l + 4].try_into().unwrap());
-        x == y || (f32::from_bits(x).is_nan() && f32::from_bits(y).is_nan())
-    });
-    let f64_lanes = (0..2).all(|l| {
-        let x = u64::from_le_bytes(a[8 * l..8 * l + 8].try_into().unwrap());
-        let y = u64::from_le_bytes(b[8 * l..8 * l + 8].try_into().unwrap());
-        x == y || (f64::from_bits(x).is_nan() && f64::from_bits(y).is_nan())
-    });
-    let f16_lanes = half
-        && (0..8).all(|l| {
-            let x = u16::from_le_bytes(a[2 * l..2 * l + 2].try_into().unwrap());
-            let y = u16::from_le_bytes(b[2 * l..2 * l + 2].try_into().unwrap());
-            let nan = |v: u16| v & 0x7FFF > 0x7C00;
-            x == y || (nan(x) && nan(y))
-        });
-    f32_lanes || f64_lanes || f16_lanes
+/// Whether every differing lane of `width` bytes holds a NaN on both sides.
+/// The width is the instruction's own: read at a wider one, a NaN in a
+/// neighbouring element would hide a real difference (`0x7fff_3c00` and
+/// `0x7fff_4000` are two f32 NaNs, but their f16 elements 1.0 and 2.0 differ).
+fn nan_payload_only(a: &[u8; 16], b: &[u8; 16], width: u32) -> bool {
+    // The all-ones exponent of the format: anything above it, sign aside, is a NaN.
+    let infinity: u64 = match width {
+        2 => 0x7C00,
+        4 => 0x7F80_0000,
+        8 => 0x7FF0_0000_0000_0000,
+        _ => return false,
+    };
+    let width = width as usize;
+    let magnitude = u64::MAX >> (65 - 8 * width);
+    let lane = |v: &[u8]| {
+        let mut bytes = [0u8; 8];
+        bytes[..width].copy_from_slice(v);
+        u64::from_le_bytes(bytes)
+    };
+    a.chunks(width).zip(b.chunks(width)).all(|(x, y)| {
+        let (x, y) = (lane(x), lane(y));
+        x == y || (x & magnitude > infinity && y & magnitude > infinity)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nan_payload_only;
+
+    fn lanes(low: u64) -> [u8; 16] {
+        let mut v = [0u8; 16];
+        v[..8].copy_from_slice(&low.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn a_different_f16_value_next_to_a_nan_is_not_a_nan_payload() {
+        let (a, b) = (lanes(0x7fff_3c00), lanes(0x7fff_4000)); // 1.0 and 2.0
+        assert!(!nan_payload_only(&a, &b, 2));
+    }
+
+    #[test]
+    fn a_different_f32_value_next_to_a_nan_is_not_a_nan_payload() {
+        let a = lanes(0x7fff_e000_3f80_0000); // 1.0 below a NaN
+        let b = lanes(0x7fff_e000_4000_0000); // 2.0 below the same NaN
+        assert!(!nan_payload_only(&a, &b, 4));
+    }
+
+    #[test]
+    fn two_nans_in_every_differing_lane_are_a_nan_payload() {
+        for (width, x, y) in [
+            (2, 0x3c00_7e01, 0x3c00_fe02),
+            (4, 0x3f80_0000_7fc0_0001, 0x3f80_0000_ffc0_0002),
+            (8, 0x7ff8_0000_0000_0001, 0xfff4_0000_0000_0000),
+        ] {
+            assert!(nan_payload_only(&lanes(x), &lanes(y), width), "{width}");
+        }
+    }
+
+    #[test]
+    fn an_infinity_is_not_a_nan() {
+        assert!(!nan_payload_only(
+            &lanes(0x7f80_0000),
+            &lanes(0x7fc0_0000),
+            4
+        ));
+    }
 }
 
 // ── Value generation ────────────────────────────────────────────────────────
