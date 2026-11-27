@@ -44,18 +44,44 @@
 //! which is conservative; it is not relied on, because inode numbers can be
 //! reused and timestamps can be coarse.
 //!
-//! # Platforms
+//! # Platforms and durability limits
 //!
-//! Exclusive create, same-directory rename, and hard links are atomic on local
-//! POSIX filesystems (Linux, macOS) and NTFS. On network filesystems these
-//! guarantees depend on the server and client (exclusive create and
-//! close-to-open consistency); they are not tested there.
+//! Exclusive create, same-directory rename, and hard links provide **atomic
+//! visibility** on local POSIX filesystems (Linux, macOS) and NTFS: concurrent
+//! or recovering readers observe either the complete old JSON project or the
+//! complete new JSON project, never a torn mix of both.
+//!
+//! **Durable acknowledgment** additionally flushes both the replacement file's
+//! contents (`File::sync_all`) and, on Unix, the parent directory entry
+//! (`sync_parent_directory`) so a subsequent reader after OS/crash recovery is
+//! not left with an unpersisted rename on filesystems that require a directory
+//! metadata sync. Platform capability limits are explicit:
+//! - On Unix, filesystems returning [`std::io::ErrorKind::Unsupported`] for
+//!   directory `sync_all` report [`CommitDurability::AtomicOnlyDirSyncUnsupported`].
+//! - On non-Unix platforms (including Windows), standard directory handles
+//!   cannot be `sync_all`'d through `std::fs::File`, so commits explicitly report
+//!   [`CommitDurability::AtomicOnlyDirSyncUnsupported`].
+//! - On hardware with volatile write caches or network/FUSE filesystems, POSIX
+//!   `sync_all` cannot guarantee physical power-loss survival; tests validate
+//!   process-crash and injected I/O failure recovery, not hardware power cuts.
+//! - A parent directory `sync_all` that fails outright after the replacement
+//!   landed does not fail the commit: the receipt reports
+//!   [`CommitDurability::AtomicOnlyDirectorySyncFailed`] plus the underlying
+//!   error in [`CommitReceipt::durability_error`], because the new bytes are
+//!   already visible and a retry could only conflict.
 use super::*;
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Upper bound on temporary files inspected per directory scan during recovery.
+pub const MAX_INSPECTED_TEMP_FILES: usize = 256;
+
+/// Upper bound on lock file bytes read when inspecting recovery state.
+pub const MAX_LOCK_INSPECT_BYTES: usize = 4096;
 
 /// Points inside a commit where tests interleave an adversarial writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,21 +97,48 @@ pub(crate) enum CommitStage {
 #[cfg(test)]
 type CommitHook = Box<dyn FnMut(CommitStage, &Path)>;
 
+/// Points inside a commit where tests inject I/O failures.
 #[cfg(test)]
-thread_local! {
-    static COMMIT_HOOK: std::cell::RefCell<Option<CommitHook>> =
-        const { std::cell::RefCell::new(None) };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FaultPoint {
+    TempCreate,
+    PartialWrite,
+    FileSync,
+    Rename,
+    DirSyncFail,
+    DirSyncUnsupported,
+    LockRelease,
 }
 
 #[cfg(test)]
 thread_local! {
+    static COMMIT_HOOK: std::cell::RefCell<Option<CommitHook>> =
+        const { std::cell::RefCell::new(None) };
     static HARD_LINKS_UNSUPPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FAULT_POINT: std::cell::Cell<Option<FaultPoint>> = const { std::cell::Cell::new(None) };
 }
 
 /// Make create-if-absent take its no-hard-link fallback on this thread.
 #[cfg(test)]
 pub(crate) fn set_hard_links_unsupported(unsupported: bool) {
     HARD_LINKS_UNSUPPORTED.with(|flag| flag.set(unsupported));
+}
+
+#[cfg(test)]
+pub(crate) fn set_fault_point(fault: Option<FaultPoint>) {
+    FAULT_POINT.with(|slot| slot.set(fault));
+}
+
+#[cfg(test)]
+fn take_fault_point(target: FaultPoint) -> bool {
+    FAULT_POINT.with(|slot| {
+        if slot.get() == Some(target) {
+            slot.set(None);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 fn hard_link(original: &Path, link: &Path) -> std::io::Result<()> {
@@ -289,6 +342,500 @@ pub(crate) fn read_persisted_revision(path: &Path) -> Result<ProjectRevision, Pr
         .map_or_else(ProjectRevision::absent, |(_, rev)| rev))
 }
 
+/// Durability level achieved once atomic replacement completes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitDurability {
+    /// Both temporary file contents and parent directory entry were synced.
+    AtomicAndDirectorySynced,
+    /// Temporary file contents were synced and atomically linked/renamed, but
+    /// parent directory `sync_all` is unsupported on this platform/filesystem.
+    AtomicOnlyDirSyncUnsupported,
+    /// The replacement landed, but the parent directory `sync_all` failed, so
+    /// the rename may not survive a crash even though every current reader sees
+    /// the new bytes. The commit is published; only its crash durability is
+    /// uncertain.
+    AtomicOnlyDirectorySyncFailed,
+}
+
+/// Result returned when committing a project with explicit durability details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitReceipt {
+    pub revision: ProjectRevision,
+    pub durability: CommitDurability,
+    pub temp_cleanup_error: Option<String>,
+    /// OS error that downgraded [`Self::durability`] to
+    /// [`CommitDurability::AtomicOnlyDirectorySyncFailed`], when that happened.
+    pub durability_error: Option<String>,
+}
+
+/// Parsed identity metadata from a `<project>.lock` file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockIdentity {
+    pub pid: Option<u32>,
+    pub process_nonce: Option<String>,
+    pub owner_token: Option<String>,
+    pub created_unix_ms: Option<u64>,
+    pub raw: String,
+    pub malformed: bool,
+}
+
+/// Liveness classification for an inspected project lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LockLiveness {
+    /// Held by an active [`ProjectLock`] guard in the current process.
+    CurrentProcessActive,
+    /// Matches the current process instance nonce, but no live guard exists
+    /// (e.g. guard leaked or abandoned inside this process).
+    CurrentProcessAbandoned,
+    /// Created by another process, an earlier run, or external writer; liveness
+    /// cannot be safely established without operator confirmation.
+    Unknown,
+}
+
+/// Snapshot of `<project>.lock` at inspection time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InspectedLock {
+    pub identity: LockIdentity,
+    pub liveness: LockLiveness,
+    pub content_blake3: String,
+}
+
+/// One matching temporary staging file found next to the project file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AbandonedTempFile {
+    pub path: PathBuf,
+    pub pid: Option<u32>,
+    pub owner_token: Option<String>,
+    pub serial: Option<u64>,
+    pub len: u64,
+    pub owned_by_lock: bool,
+}
+
+/// Persisted project file health discovered during recovery inspection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ProjectStateStatus {
+    Absent,
+    Valid {
+        revision: String,
+        schema_version: u32,
+    },
+    Corrupt {
+        error: String,
+    },
+}
+
+/// Read-only inspection report for crash recovery at `<project>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryInspection {
+    pub project_path: PathBuf,
+    pub project_state: ProjectStateStatus,
+    pub lock_path: PathBuf,
+    pub lock: Option<InspectedLock>,
+    pub temp_files: Vec<AbandonedTempFile>,
+    pub temp_files_truncated: bool,
+}
+
+/// Explicit confirmation required before removing an unverified stale lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleLockConfirmation {
+    pub expected_content_blake3: String,
+    pub operator_confirmed: bool,
+}
+
+/// Outcome of cleaning up provably abandoned temporary staging files.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryCleanupReport {
+    pub removed_temp_files: Vec<PathBuf>,
+    pub skipped_temp_files: Vec<PathBuf>,
+}
+
+fn process_nonce() -> &'static str {
+    static NONCE: OnceLock<String> = OnceLock::new();
+    NONCE.get_or_init(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let addr = (&raw const NONCE) as usize as u64;
+        format!("{now:x}-{addr:x}")
+    })
+}
+
+fn active_lock_tokens() -> &'static Mutex<HashSet<String>> {
+    static ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn register_active_lock(owner_token: &str) {
+    let mut set = active_lock_tokens()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    set.insert(owner_token.to_string());
+}
+
+fn unregister_active_lock(owner_token: &str) {
+    let mut set = active_lock_tokens()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    set.remove(owner_token);
+}
+
+fn is_active_lock_token(owner_token: &str) -> bool {
+    let set = active_lock_tokens()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    set.contains(owner_token)
+}
+
+fn lock_path_for(project_path: &Path) -> PathBuf {
+    let mut lock_name = project_path.as_os_str().to_os_string();
+    lock_name.push(".lock");
+    PathBuf::from(lock_name)
+}
+
+fn parse_lock_identity(raw: String) -> LockIdentity {
+    let mut pid = None;
+    let mut process_nonce = None;
+    let mut owner_token = None;
+    let mut created_unix_ms = None;
+    let mut recognized = false;
+    let mut malformed = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            malformed = true;
+            continue;
+        };
+        match key {
+            "pid" => match value.parse::<u32>() {
+                Ok(parsed) => {
+                    pid = Some(parsed);
+                    recognized = true;
+                }
+                Err(_) => malformed = true,
+            },
+            "process_nonce" if !value.is_empty() => {
+                process_nonce = Some(value.to_string());
+                recognized = true;
+            }
+            "owner" if !value.is_empty() => {
+                owner_token = Some(value.to_string());
+                recognized = true;
+            }
+            "created_unix_ms" => match value.parse::<u64>() {
+                Ok(ms) => {
+                    created_unix_ms = Some(ms);
+                    recognized = true;
+                }
+                Err(_) => malformed = true,
+            },
+            _ => malformed = true,
+        }
+    }
+
+    if !recognized {
+        malformed = true;
+    }
+
+    LockIdentity {
+        pid,
+        process_nonce,
+        owner_token,
+        created_unix_ms,
+        raw,
+        malformed,
+    }
+}
+
+fn classify_lock_liveness(identity: &LockIdentity) -> LockLiveness {
+    if identity.pid == Some(std::process::id())
+        && identity.process_nonce.as_deref() == Some(process_nonce())
+    {
+        if identity
+            .owner_token
+            .as_deref()
+            .is_some_and(is_active_lock_token)
+        {
+            return LockLiveness::CurrentProcessActive;
+        }
+        return LockLiveness::CurrentProcessAbandoned;
+    }
+    LockLiveness::Unknown
+}
+
+fn read_lock_bounded(lock_path: &Path) -> Result<Option<Vec<u8>>, ProjectError> {
+    let file = match OpenOptions::new().read(true).open(lock_path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ProjectError::Read {
+                path: lock_path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let mut buf = Vec::new();
+    let mut reader = file.take(MAX_LOCK_INSPECT_BYTES as u64 + 1);
+    reader
+        .read_to_end(&mut buf)
+        .map_err(|source| ProjectError::Read {
+            path: lock_path.to_path_buf(),
+            source,
+        })?;
+    Ok(Some(buf))
+}
+
+fn inspect_lock_file(lock_path: &Path) -> Result<Option<InspectedLock>, ProjectError> {
+    let Some(bytes) = read_lock_bounded(lock_path)? else {
+        return Ok(None);
+    };
+    let truncated = bytes.len() > MAX_LOCK_INSPECT_BYTES;
+    let slice = &bytes[..bytes.len().min(MAX_LOCK_INSPECT_BYTES)];
+    let digest = blake3::hash(slice).to_hex().to_string();
+    let raw = String::from_utf8_lossy(slice).into_owned();
+    let mut identity = parse_lock_identity(raw);
+    if truncated {
+        identity.malformed = true;
+    }
+    let liveness = classify_lock_liveness(&identity);
+    Ok(Some(InspectedLock {
+        identity,
+        liveness,
+        content_blake3: digest,
+    }))
+}
+
+fn parse_temp_metadata(
+    project_name: &str,
+    candidate_name: &str,
+) -> Option<(Option<u32>, Option<String>, Option<u64>)> {
+    let prefix = format!("{project_name}.");
+    let rest = candidate_name.strip_prefix(&prefix)?;
+    let middle = rest.strip_suffix(".tmp")?;
+    let parts: Vec<&str> = middle.split('.').collect();
+    match parts.as_slice() {
+        // Legacy shape: <project>.<pid>.<serial>.tmp
+        [pid_s, serial_s] => {
+            let pid = pid_s.parse::<u32>().ok()?;
+            let serial = serial_s.parse::<u64>().ok()?;
+            Some((Some(pid), None, Some(serial)))
+        }
+        // Owner-tagged shape: <project>.<pid>.<owner_token>.<serial>.tmp
+        [pid_s, owner_s, serial_s] if !owner_s.is_empty() => {
+            let pid = pid_s.parse::<u32>().ok()?;
+            let serial = serial_s.parse::<u64>().ok()?;
+            Some((Some(pid), Some((*owner_s).to_string()), Some(serial)))
+        }
+        _ => None,
+    }
+}
+
+fn sync_parent_directory(path: &Path) -> std::io::Result<CommitDurability> {
+    #[cfg(test)]
+    if take_fault_point(FaultPoint::DirSyncFail) {
+        return Err(std::io::Error::other(
+            "injected parent directory sync failure",
+        ));
+    }
+    #[cfg(test)]
+    if take_fault_point(FaultPoint::DirSyncUnsupported) {
+        return Ok(CommitDurability::AtomicOnlyDirSyncUnsupported);
+    }
+
+    #[cfg(unix)]
+    {
+        let dir_path = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+        let dir = File::open(dir_path)?;
+        match dir.sync_all() {
+            Ok(()) => Ok(CommitDurability::AtomicAndDirectorySynced),
+            Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+                Ok(CommitDurability::AtomicOnlyDirSyncUnsupported)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(CommitDurability::AtomicOnlyDirSyncUnsupported)
+    }
+}
+
+/// Inspect `<project_path>`, its lock file, and any matching staging temporary
+/// files without mutating disk state.
+pub fn inspect_recovery(project_path: &Path) -> Result<RecoveryInspection, ProjectError> {
+    let project_state = match Project::read_with_revision(project_path) {
+        Ok((None, _)) => ProjectStateStatus::Absent,
+        Ok((Some(project), rev)) => ProjectStateStatus::Valid {
+            revision: rev.summary(),
+            schema_version: project.schema_version,
+        },
+        Err(err) => ProjectStateStatus::Corrupt {
+            error: err.to_string(),
+        },
+    };
+    let lock_path = lock_path_for(project_path);
+    let lock = inspect_lock_file(&lock_path)?;
+
+    let mut temp_files = Vec::new();
+    let mut temp_files_truncated = false;
+    if let Some(file_name) = project_path.file_name().and_then(|n| n.to_str()) {
+        let parent = match project_path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        match std::fs::read_dir(parent) {
+            Ok(entries) => {
+                let mut candidates = Vec::new();
+                for entry_res in entries {
+                    let entry = entry_res.map_err(|source| ProjectError::Read {
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
+                    let name_os = entry.file_name();
+                    let Some(name_str) = name_os.to_str() else {
+                        continue;
+                    };
+                    let Some((pid, owner_token, serial)) = parse_temp_metadata(file_name, name_str)
+                    else {
+                        continue;
+                    };
+                    let path = entry.path();
+                    let meta = match std::fs::symlink_metadata(&path) {
+                        Ok(m) if m.file_type().is_file() => m,
+                        _ => continue,
+                    };
+                    let owned_by_lock = match lock.as_ref() {
+                        Some(inspected) => {
+                            let same_owner = inspected.identity.owner_token.is_some()
+                                && inspected.identity.owner_token == owner_token;
+                            let legacy_pid_match = owner_token.is_none()
+                                && inspected.identity.pid.is_some()
+                                && inspected.identity.pid == pid;
+                            same_owner || legacy_pid_match || owner_token.is_none()
+                        }
+                        None => owner_token.as_deref().is_some_and(is_active_lock_token),
+                    };
+                    candidates.push(AbandonedTempFile {
+                        path,
+                        pid,
+                        owner_token,
+                        serial,
+                        len: meta.len(),
+                        owned_by_lock,
+                    });
+                }
+                candidates.sort_by(|a, b| a.path.cmp(&b.path));
+                if candidates.len() > MAX_INSPECTED_TEMP_FILES {
+                    temp_files_truncated = true;
+                    candidates.truncate(MAX_INSPECTED_TEMP_FILES);
+                }
+                temp_files = candidates;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(ProjectError::Read {
+                    path: parent.to_path_buf(),
+                    source,
+                });
+            }
+        }
+    }
+
+    Ok(RecoveryInspection {
+        project_path: project_path.to_path_buf(),
+        project_state,
+        lock_path,
+        lock,
+        temp_files,
+        temp_files_truncated,
+    })
+}
+
+/// Explicitly remove a stale lock after verifying its digest and confirming it
+/// does not belong to an active writer.
+///
+/// Refuses unconditionally for [`LockLiveness::CurrentProcessActive`], and
+/// requires `confirmation.operator_confirmed == true` for [`LockLiveness::Unknown`].
+pub fn remove_stale_lock(
+    project_path: &Path,
+    confirmation: &StaleLockConfirmation,
+) -> Result<bool, ProjectError> {
+    let lock_path = lock_path_for(project_path);
+    let Some(inspected) = inspect_lock_file(&lock_path)? else {
+        return Ok(false);
+    };
+    if inspected.liveness == LockLiveness::CurrentProcessActive {
+        return Err(ProjectError::RecoveryRefused {
+            path: lock_path,
+            reason: "lock is held by an active writer in this process".into(),
+        });
+    }
+    if inspected.content_blake3 != confirmation.expected_content_blake3 {
+        return Err(ProjectError::RecoveryRefused {
+            path: lock_path,
+            reason: "lock content changed since inspection; refusing to remove successor lock"
+                .into(),
+        });
+    }
+    if inspected.liveness == LockLiveness::Unknown && !confirmation.operator_confirmed {
+        return Err(ProjectError::RecoveryRefused {
+            path: lock_path,
+            reason: "cannot prove foreign/earlier lock writer has exited without operator_confirmed=true".into(),
+        });
+    }
+    match std::fs::remove_file(&lock_path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(ProjectError::Write {
+            path: lock_path,
+            source,
+        }),
+    }
+}
+
+/// Remove only provably abandoned temporary staging files associated with
+/// `project_path`. Active or lock-owned temporary files are never deleted.
+pub fn recover_abandoned_temps(project_path: &Path) -> Result<RecoveryCleanupReport, ProjectError> {
+    let inspection = inspect_recovery(project_path)?;
+    let mut report = RecoveryCleanupReport::default();
+    for temp in inspection.temp_files {
+        if temp.owned_by_lock
+            || temp
+                .owner_token
+                .as_deref()
+                .is_some_and(is_active_lock_token)
+        {
+            report.skipped_temp_files.push(temp.path);
+            continue;
+        }
+        match std::fs::symlink_metadata(&temp.path) {
+            Ok(meta) if meta.file_type().is_file() => match std::fs::remove_file(&temp.path) {
+                Ok(()) => report.removed_temp_files.push(temp.path),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(ProjectError::Write {
+                        path: temp.path,
+                        source,
+                    });
+                }
+            },
+            Ok(_) | Err(_) => report.skipped_temp_files.push(temp.path),
+        }
+    }
+    Ok(report)
+}
+
 /// Writer exclusion for one project file; see the module documentation.
 pub struct ProjectLock {
     path: PathBuf,
@@ -297,13 +844,18 @@ pub struct ProjectLock {
     /// check them, so a guard whose lock was removed (and possibly re-taken
     /// by another writer) neither commits nor deletes the successor's lock.
     owner: String,
+    /// Unique per-acquisition identifier recorded inside `owner` and in
+    /// staging filenames.
+    owner_token: String,
     file: Option<File>,
+    release_attempted: bool,
 }
 
 impl ProjectLock {
     /// Hold this guard across read, mutation and write. A crashed writer's
-    /// lock is deliberately not guessed away: stop the writer before removing
-    /// a stale lock. Readers need no lock because replacement is atomic.
+    /// lock is deliberately not guessed away: inspect with [`inspect_recovery`]
+    /// and remove explicitly via [`remove_stale_lock`]. Readers need no lock
+    /// because replacement is atomic.
     pub fn acquire(path: &Path) -> Result<Self, ProjectError> {
         let fail = |source| ProjectError::Write {
             path: path.to_path_buf(),
@@ -312,9 +864,7 @@ impl ProjectLock {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent).map_err(fail)?;
         }
-        let mut lock_name = path.as_os_str().to_os_string();
-        lock_name.push(".lock");
-        let lock_path = PathBuf::from(lock_name);
+        let lock_path = lock_path_for(path);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -327,13 +877,19 @@ impl ProjectLock {
                 }
             })?;
         static ACQUISITIONS: AtomicU64 = AtomicU64::new(0);
-        let started = std::time::SystemTime::now()
+        let now_dur = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        let owner = format!(
-            "pid={}\nowner={started:x}-{:x}\n",
-            std::process::id(),
+            .unwrap_or_default();
+        let started = now_dur.as_nanos();
+        let created_ms = u64::try_from(now_dur.as_millis()).unwrap_or(u64::MAX);
+        let owner_token = format!(
+            "{started:x}-{}",
             ACQUISITIONS.fetch_add(1, Ordering::Relaxed)
+        );
+        let owner = format!(
+            "pid={}\nprocess_nonce={}\nowner={owner_token}\ncreated_unix_ms={created_ms}\n",
+            std::process::id(),
+            process_nonce(),
         );
         if let Err(source) = file
             .write_all(owner.as_bytes())
@@ -345,11 +901,14 @@ impl ProjectLock {
             let _ = std::fs::remove_file(&lock_path);
             return Err(fail(source));
         }
+        register_active_lock(&owner_token);
         Ok(Self {
             path: path.to_path_buf(),
             lock_path,
             owner,
+            owner_token,
             file: Some(file),
+            release_attempted: false,
         })
     }
 
@@ -362,6 +921,45 @@ impl ProjectLock {
         }
     }
 
+    /// Explicitly release this lock guard and propagate any unlink error instead
+    /// of discarding it on `Drop`.
+    pub fn release(mut self) -> Result<(), ProjectError> {
+        self.release_attempted = true;
+        drop(self.file.take());
+        let owned = match self.still_owned() {
+            Ok(owned) => owned,
+            Err(source) => {
+                unregister_active_lock(&self.owner_token);
+                return Err(ProjectError::Write {
+                    path: self.lock_path.clone(),
+                    source,
+                });
+            }
+        };
+        if !owned {
+            unregister_active_lock(&self.owner_token);
+            return Ok(());
+        }
+        #[cfg(test)]
+        if take_fault_point(FaultPoint::LockRelease) {
+            unregister_active_lock(&self.owner_token);
+            return Err(ProjectError::Write {
+                path: self.lock_path.clone(),
+                source: std::io::Error::other("injected lock release failure"),
+            });
+        }
+        let res = match std::fs::remove_file(&self.lock_path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(ProjectError::Write {
+                path: self.lock_path.clone(),
+                source,
+            }),
+        };
+        unregister_active_lock(&self.owner_token);
+        res
+    }
+
     /// Read the project file and its persisted revision token while holding the writer lock.
     pub fn read_with_revision(&self) -> Result<(Option<Project>, ProjectRevision), ProjectError> {
         Project::read_with_revision(&self.path)
@@ -371,13 +969,27 @@ impl ProjectLock {
     ///
     /// Returns the [`ProjectRevision`] of exactly the bytes this call
     /// persisted, or [`ProjectError::Conflict`] without altering the file on
-    /// mismatch. The module documentation states which writers this protects
-    /// against.
+    /// mismatch. A post-replacement durability barrier failure is not an
+    /// error: the bytes are already published, so it is reported as a
+    /// downgraded [`CommitDurability`] by [`Self::write_checked_with_receipt`].
     pub fn write_checked(
         &self,
         project: &Project,
         precondition: CommitPrecondition,
     ) -> Result<ProjectRevision, ProjectError> {
+        Ok(self
+            .write_checked_with_receipt(project, precondition)?
+            .revision)
+    }
+
+    /// Atomically replace the project file after verifying `precondition` under
+    /// the lock, returning both the committed revision and the achieved
+    /// durability level ([`CommitReceipt`]).
+    pub fn write_checked_with_receipt(
+        &self,
+        project: &Project,
+        precondition: CommitPrecondition,
+    ) -> Result<CommitReceipt, ProjectError> {
         project.history.validate()?;
         let fail = |source| ProjectError::Write {
             path: self.path.clone(),
@@ -411,11 +1023,18 @@ impl ProjectLock {
         text.push('\n');
         let digest = *blake3::hash(text.as_bytes()).as_bytes();
         let len = text.len() as u64;
+
+        #[cfg(test)]
+        if take_fault_point(FaultPoint::TempCreate) {
+            return Err(fail(std::io::Error::other("injected temp create failure")));
+        }
+
         static SERIAL: AtomicU64 = AtomicU64::new(0);
         let mut name = self.path.as_os_str().to_os_string();
         name.push(format!(
-            ".{}.{}.tmp",
+            ".{}.{}.{}.tmp",
             std::process::id(),
+            self.owner_token,
             SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let temp = PathBuf::from(name);
@@ -425,6 +1044,7 @@ impl ProjectLock {
             .create_new(true)
             .open(&temp)
             .map_err(fail)?;
+        let mut replaced = false;
         let result = self.publish(
             file,
             &temp,
@@ -433,8 +1053,9 @@ impl ProjectLock {
             &precondition,
             digest,
             len,
+            &mut replaced,
         );
-        if result.is_err() {
+        if result.is_err() && !replaced {
             let _ = std::fs::remove_file(&temp);
         }
         result
@@ -450,14 +1071,27 @@ impl ProjectLock {
         precondition: &CommitPrecondition,
         digest: [u8; 32],
         len: u64,
-    ) -> Result<ProjectRevision, ProjectError> {
+        replaced: &mut bool,
+    ) -> Result<CommitReceipt, ProjectError> {
         let fail = |source| ProjectError::Write {
             path: self.path.clone(),
             source,
         };
+        #[cfg(test)]
+        if take_fault_point(FaultPoint::PartialWrite) {
+            let partial = &text[..text.len().min(16)];
+            let _ = file.write_all(partial);
+            return Err(fail(std::io::Error::other(
+                "injected failure after partial temp write",
+            )));
+        }
         file.write_all(text).map_err(fail)?;
         if let Some(permissions) = permissions {
             file.set_permissions(permissions).map_err(fail)?;
+        }
+        #[cfg(test)]
+        if take_fault_point(FaultPoint::FileSync) {
+            return Err(fail(std::io::Error::other("injected file sync failure")));
         }
         file.sync_all().map_err(fail)?;
         commit_stage(CommitStage::TempDurable, &self.path);
@@ -486,6 +1120,11 @@ impl ProjectLock {
         }
         commit_stage(CommitStage::PreconditionChecked, &self.path);
 
+        #[cfg(test)]
+        if take_fault_point(FaultPoint::Rename) {
+            return Err(fail(std::io::Error::other("injected rename failure")));
+        }
+
         // Windows cannot be relied on to rename a file this process holds
         // open; elsewhere the handle stays open to stamp the published inode.
         #[cfg(not(unix))]
@@ -505,12 +1144,17 @@ impl ProjectLock {
             },
             _ => false,
         };
-        if published_by_link {
-            // The commit has landed; a leftover temporary name is harmless.
-            let _ = std::fs::remove_file(temp);
-        } else {
+        if !published_by_link {
             std::fs::rename(temp, &self.path).map_err(fail)?;
         }
+        *replaced = true;
+        let temp_cleanup_error = if published_by_link {
+            // The commit has landed; failure to unlink the staging alias does
+            // not un-publish the project.
+            std::fs::remove_file(temp).err().map(|e| e.to_string())
+        } else {
+            None
+        };
         commit_stage(CommitStage::Replaced, &self.path);
 
         // The token must describe the bytes this call published, never
@@ -527,7 +1171,28 @@ impl ProjectLock {
             }
             _ => None,
         };
-        Ok(ProjectRevision::present(digest, len, identity))
+        let revision = ProjectRevision::present(digest, len, identity);
+
+        let (durability, durability_error) = match sync_parent_directory(&self.path) {
+            Ok(durability) => (durability, None),
+            Err(source) => {
+                // The rename already landed, so every reader sees the new
+                // bytes. Reporting an error here would tell the caller the
+                // commit failed and invite a retry that can only conflict;
+                // downgrade the durability classification instead.
+                (
+                    CommitDurability::AtomicOnlyDirectorySyncFailed,
+                    Some(source.to_string()),
+                )
+            }
+        };
+
+        Ok(CommitReceipt {
+            revision,
+            durability,
+            temp_cleanup_error,
+            durability_error,
+        })
     }
 
     /// Create the project file only if it does not already exist.
@@ -560,6 +1225,9 @@ impl ProjectLock {
 
 impl Drop for ProjectLock {
     fn drop(&mut self) {
+        if self.release_attempted {
+            return;
+        }
         // Close before deletion, including on platforms that disallow unlinking
         // an open handle.
         drop(self.file.take());
@@ -568,6 +1236,7 @@ impl Drop for ProjectLock {
         if matches!(self.still_owned(), Ok(true)) {
             let _ = std::fs::remove_file(&self.lock_path);
         }
+        unregister_active_lock(&self.owner_token);
     }
 }
 
@@ -1234,5 +1903,117 @@ mod tests {
         assert_eq!(last.names[&0x1000], expected.to_string());
         assert_eq!(last.history.revisions().len() as u64, expected);
         assert!(!dir.path().join("counter.json.lock").exists());
+    }
+
+    #[test]
+    fn fault_injection_across_commit_stages_separates_pre_and_post_replace_outcomes() {
+        struct ResetFault;
+        impl Drop for ResetFault {
+            fn drop(&mut self) {
+                set_fault_point(None);
+            }
+        }
+        let _reset = ResetFault;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("project.json");
+        let mut initial = project();
+        initial.set_name(0x1000, "initial");
+        let rev0 = initial.create_if_absent(&path).unwrap();
+
+        let mut next = initial.clone();
+        next.set_name(0x1000, "updated");
+
+        // Pre-replacement faults leave persisted state identical to `initial`
+        // and clean up temporary staging files.
+        for fault in [
+            FaultPoint::TempCreate,
+            FaultPoint::PartialWrite,
+            FaultPoint::FileSync,
+            FaultPoint::Rename,
+        ] {
+            set_fault_point(Some(fault));
+            let err = next
+                .commit_checked_with_receipt(&path, CommitPrecondition::IfRevision(rev0.clone()))
+                .expect_err("injected fault must fail commit");
+            assert!(
+                matches!(err, ProjectError::Write { .. }),
+                "expected pre-commit Write error for {fault:?}, got {err:?}"
+            );
+            let (persisted, rev_now) = Project::read_with_revision(&path).unwrap();
+            assert_eq!(persisted.unwrap(), initial);
+            assert_eq!(rev_now, rev0);
+            let inspection = inspect_recovery(&path).unwrap();
+            assert!(
+                inspection.temp_files.is_empty(),
+                "pre-commit failure for {fault:?} leaked temps: {:?}",
+                inspection.temp_files
+            );
+            assert!(inspection.lock.is_none());
+        }
+
+        // Unsupported dir-sync platform behavior still succeeds with an explicit
+        // downgraded durability classification instead of claiming full sync.
+        set_fault_point(Some(FaultPoint::DirSyncUnsupported));
+        let receipt = next
+            .commit_checked_with_receipt(&path, CommitPrecondition::IfRevision(rev0))
+            .unwrap();
+        assert_eq!(
+            receipt.durability,
+            CommitDurability::AtomicOnlyDirSyncUnsupported
+        );
+        assert_eq!(Project::read(&path).unwrap().unwrap(), next);
+
+        // Post-replacement dir-sync failure is still a published commit: the
+        // receipt must report the downgraded durability instead of an error,
+        // because disk holds the complete valid new project and a retry would
+        // only conflict.
+        let mut third = next.clone();
+        third.set_name(0x1000, "after_uncertain");
+        set_fault_point(Some(FaultPoint::DirSyncFail));
+        let uncertain = third
+            .commit_checked_with_receipt(&path, CommitPrecondition::IfRevision(receipt.revision))
+            .expect("a landed commit must not be reported as an error");
+        assert_eq!(
+            uncertain.durability,
+            CommitDurability::AtomicOnlyDirectorySyncFailed
+        );
+        assert!(
+            uncertain.durability_error.is_some(),
+            "downgraded durability must keep the underlying io error"
+        );
+        let uncertain_rev = uncertain.revision;
+        let (reopened, reopened_rev) = Project::read_with_revision(&path).unwrap();
+        assert_eq!(reopened.unwrap(), third);
+        assert_eq!(reopened_rev.summary(), uncertain_rev.summary());
+
+        // Lock-release failure after an otherwise completed commit reports
+        // `Write` on release(), leaves the new project valid, and retains
+        // lock visibility for explicit recovery inspection.
+        let guard = ProjectLock::acquire(&path).unwrap();
+        let mut fourth = third.clone();
+        fourth.set_name(0x1000, "release_fail");
+        guard
+            .write_checked_with_receipt(&fourth, CommitPrecondition::IfRevision(reopened_rev))
+            .unwrap();
+        set_fault_point(Some(FaultPoint::LockRelease));
+        let rel_err = guard
+            .release()
+            .expect_err("release must surface unlink error");
+        assert!(matches!(rel_err, ProjectError::Write { .. }));
+        assert_eq!(Project::read(&path).unwrap().unwrap(), fourth);
+        let inspection = inspect_recovery(&path).unwrap();
+        let lock = inspection.lock.expect("abandoned lock remains inspectable");
+        assert_eq!(lock.liveness, LockLiveness::CurrentProcessAbandoned);
+        assert!(
+            remove_stale_lock(
+                &path,
+                &StaleLockConfirmation {
+                    expected_content_blake3: lock.content_blake3,
+                    operator_confirmed: false,
+                },
+            )
+            .unwrap()
+        );
     }
 }
