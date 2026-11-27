@@ -23,7 +23,7 @@
 //!   (`observed_bytes + missing_bytes == requested_bytes`).
 
 use super::platform::{PlatformMemory, PlatformMemoryImpl};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Default hard upper bound for a single exact or partial read request (64 MiB).
@@ -80,7 +80,7 @@ pub enum MemoryError {
 }
 
 /// Memory protection flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryProtection {
     pub read: bool,
     pub write: bool,
@@ -111,7 +111,7 @@ impl MemoryProtection {
 }
 
 /// Represents a memory region in the target process.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRegion {
     /// Start address of the region.
     pub base_address: u64,
@@ -128,7 +128,7 @@ pub struct MemoryRegion {
 
 /// Reason why an address range inside a partial or sparse acquisition could not
 /// be observed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryGapReason {
     /// No memory mapping covers the address range.
@@ -184,7 +184,7 @@ impl MemoryGapReason {
 }
 
 /// Contiguous unread interval `[start, start + len)` with its failure reason.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryGap {
     pub start: u64,
     pub len: u64,
@@ -202,7 +202,7 @@ impl MemoryGap {
 /// Contiguous observed bytes read from `[start, start + bytes.len())`.
 ///
 /// Any `0x00` byte present inside `bytes` was genuinely observed from target memory.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedMemoryRun {
     pub start: u64,
     pub bytes: Vec<u8>,
@@ -225,7 +225,7 @@ impl ObservedMemoryRun {
 }
 
 /// Ordered element inside a [`SparseMemoryCapture`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum MemorySegment {
     Observed(ObservedMemoryRun),
@@ -356,7 +356,7 @@ impl SparseReadOptions {
 /// partition, so `observed_bytes + missing_bytes == requested_bytes` and
 /// `complete == (missing_bytes == 0)` always hold for a summary obtained from
 /// [`SparseMemoryCapture::coverage`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparseCoverageSummary {
     pub requested_bytes: u64,
     pub observed_bytes: u64,
@@ -435,7 +435,23 @@ pub enum SparseCaptureError {
 /// `observed_bytes + missing_bytes == requested_bytes`, and `complete` means
 /// every requested address was observed exactly once. Fields are private so the
 /// invariant cannot be broken after construction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Deserialize)]
+struct RawSparseMemoryCapture {
+    start: u64,
+    requested_len: u64,
+    segments: Vec<MemorySegment>,
+}
+
+impl TryFrom<RawSparseMemoryCapture> for SparseMemoryCapture {
+    type Error = SparseCaptureError;
+
+    fn try_from(raw: RawSparseMemoryCapture) -> Result<Self, Self::Error> {
+        Self::from_segments(raw.start, raw.requested_len, raw.segments)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawSparseMemoryCapture")]
 pub struct SparseMemoryCapture {
     start: u64,
     requested_len: u64,

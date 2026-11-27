@@ -23,6 +23,7 @@
 
 // Core modules
 pub mod capabilities;
+pub mod forensics;
 pub mod memory;
 pub mod platform;
 pub mod timeline;

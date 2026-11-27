@@ -1081,6 +1081,7 @@ dependencies = [
  "crossbeam-channel",
  "fission-core",
  "fission-emulator",
+ "fission-evidence",
  "fission-loader",
  "fission-plugin",
  "fission-sleigh",
