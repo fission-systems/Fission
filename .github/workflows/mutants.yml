@@ -1,16 +1,18 @@
 name: Mutation testing (weekly)
 
-# Which lines that changed on main this week can be broken without any test
-# failing? cargo-mutants rewrites each changed function body (returns a
-# constant, flips a comparison, deletes a statement) and runs the tests; a
-# mutant that survives marks code no test checks.
+# Report-only weekly mutation testing using immutable cohorts and a bounded
+# backlog (see scripts/ci/mutants_cohort.py, Issue #1251).
 #
-# A week of main produced 5,448 mutants (to 2026-11-22). At one to two minutes
-# each, four jobs would need over 20 hours apiece. So the week's mutants are
-# cut into 48 slices of about 113 and each run takes four, rotating with the
-# ISO week: a twelfth of the mutants each week, every slice within 12 weeks.
-# Report-only: a missed mutant is a lead, not a defect. The job fails only when the tool itself does (for
-# example the unmutated tree failing its tests).
+# Instead of re-sharding a moving 7-day diff every week, each run snapshots an
+# immutable cohort pinned to (base_sha, head_sha, diff_sha256, tool versions,
+# shard count) and advances up to 4 pending/retryable shards FIFO across a
+# bounded active backlog (max 3 active cohorts, max 42-day cohort lifetime).
+# Compact cohort manifests are retained for 90 days (beyond cohort expiry) and
+# every unattempted mutant stays explicitly `not_run` (or `infra_error`), never
+# claimed as complete across different diff populations.
+#
+# Report-only: missed mutants are diagnostic leads, never a merge/release gate.
+# The workflow fails only on tool/infrastructure failures.
 
 on:
   schedule:
@@ -18,12 +20,13 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "Mutate lines changed on main in the last N days"
+        description: "Fallback lookback window (days) when no prior cohort head SHA exists"
         required: false
         default: "7"
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: mutants-${{ github.ref }}
@@ -32,18 +35,17 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   DAYS: ${{ inputs.days || '7' }}
+  CARGO_MUTANTS_VERSION: "27.1.0"
+  CARGO_NEXTEST_VERSION: "0.9.136"
 
 jobs:
-  mutants:
-    name: Mutants (slice ${{ matrix.shard }} of this week's four)
+  plan:
+    name: Plan immutable mutation cohorts
     runs-on: ubuntu-latest
-    timeout-minutes: 340
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
-    env:
-      SHARD: ${{ matrix.shard }}
+    timeout-minutes: 30
+    outputs:
+      assignments: ${{ steps.cohort.outputs.assignments }}
+      has_assignments: ${{ steps.cohort.outputs.has_assignments }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -55,58 +57,217 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: fission-mutants-plan-${{ runner.os }}
+      - uses: taiki-e/install-action@25f51f6b1bf4c37e2e1cd51ed1e4163e8f69e4f9 # v2
+        with:
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }},cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
+      - name: Restore prior compact cohort manifest (if present)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/prev-state"
+          run_ids="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mutants.yml --status completed --limit 10 --json databaseId --jq '.[].databaseId' || true)"
+          for run_id in $run_ids; do
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name mutants-cohort-state --dir "$RUNNER_TEMP/prev-state" 2>/dev/null; then
+              if [ -f "$RUNNER_TEMP/prev-state/cohort-state.json" ]; then
+                echo "Restored cohort state from run $run_id"
+                break
+              fi
+            fi
+          done
+      - name: Snapshot diff and list deterministic cohort mutants
+        id: snapshot
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          base_sha=""
+          if [ -f "$RUNNER_TEMP/prev-state/cohort-state.json" ]; then
+            cand_sha="$(python3 -c '
+          import json, sys
+          s = json.load(open(sys.argv[1], encoding="utf-8"))
+          cohorts = s.get("cohorts", [])
+          print(cohorts[-1]["head_sha"] if cohorts else "")
+          ' "$RUNNER_TEMP/prev-state/cohort-state.json")"
+            if [ -n "$cand_sha" ] && git cat-file -e "${cand_sha}^{commit}" 2>/dev/null; then
+              base_sha="$cand_sha"
+            fi
+          fi
+          if [ -z "$base_sha" ]; then
+            base_sha="$(git rev-list -1 --before="${DAYS} days ago" HEAD || git rev-list --max-parents=0 HEAD | head -n 1)"
+          fi
+          git diff "$base_sha" "$head_sha" -- 'crates/**/*.rs' ':!crates/**/tests/**' > "$RUNNER_TEMP/cohort.diff"
+          if [ -s "$RUNNER_TEMP/cohort.diff" ]; then
+            cargo mutants --list --json --in-diff "$RUNNER_TEMP/cohort.diff" --sharding round-robin > "$RUNNER_TEMP/mutants-list.json"
+          else
+            echo '[]' > "$RUNNER_TEMP/mutants-list.json"
+          fi
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+      - name: Plan bounded backlog shard assignments
+        id: cohort
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/plan-out"
+          state_args=()
+          if [ -f "$RUNNER_TEMP/prev-state/cohort-state.json" ]; then
+            state_args=(--state-in "$RUNNER_TEMP/prev-state/cohort-state.json")
+          fi
+          python3 scripts/ci/mutants_cohort.py plan \
+            "${state_args[@]}" \
+            --state-out "$RUNNER_TEMP/plan-out/planned-state.json" \
+            --assignments-out "$RUNNER_TEMP/plan-out/assignments.json" \
+            --diff-file "$RUNNER_TEMP/cohort.diff" \
+            --mutants-json "$RUNNER_TEMP/mutants-list.json" \
+            --base-sha "${{ steps.snapshot.outputs.base_sha }}" \
+            --head-sha "${{ steps.snapshot.outputs.head_sha }}" \
+            --tool-version "$CARGO_MUTANTS_VERSION" \
+            --nextest-version "$CARGO_NEXTEST_VERSION" \
+            --run-id "${{ github.run_id }}" \
+            --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutants-plan
+          path: ${{ runner.temp }}/plan-out
+          if-no-files-found: error
+          retention-days: 7
+
+  mutants:
+    name: Mutants (cohort ${{ matrix.assignment.cohort_id }} shard ${{ matrix.assignment.shard }}/${{ matrix.assignment.shard_count }})
+    needs: plan
+    if: needs.plan.outputs.has_assignments == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        assignment: ${{ fromJson(needs.plan.outputs.assignments) }}
+    env:
+      COHORT_ID: ${{ matrix.assignment.cohort_id }}
+      BASE_SHA: ${{ matrix.assignment.base_sha }}
+      HEAD_SHA: ${{ matrix.assignment.head_sha }}
+      EXPECTED_DIFF_SHA: ${{ matrix.assignment.diff_sha256 }}
+      SHARD: ${{ matrix.assignment.shard }}
+      SHARD_COUNT: ${{ matrix.assignment.shard_count }}
+      SHARDING_METHOD: ${{ matrix.assignment.sharding_method }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ matrix.assignment.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
           shared-key: fission-mutants-${{ runner.os }}
       - uses: taiki-e/install-action@25f51f6b1bf4c37e2e1cd51ed1e4163e8f69e4f9 # v2
         with:
-          tool: cargo-mutants,cargo-nextest
-      - name: Collect this week's Rust changes on main
-        id: diff
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }},cargo-nextest@${{ env.CARGO_NEXTEST_VERSION }}
+      - name: Reconstruct and verify immutable cohort diff
         run: |
           set -euo pipefail
-          base="$(git rev-list -1 --before="${DAYS} days ago" HEAD)"
-          git diff "$base" HEAD -- 'crates/**/*.rs' ':!crates/**/tests/**' > "$RUNNER_TEMP/week.diff"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "lines=$(wc -l < "$RUNNER_TEMP/week.diff")" >> "$GITHUB_OUTPUT"
-          week="$(date -u +%V)"
-          echo "slice=$(( (10#$week * 4 + SHARD) % 48 ))" >> "$GITHUB_OUTPUT"
-      - name: Mutate the changed lines
-        if: steps.diff.outputs.lines != '0'
+          git diff "$BASE_SHA" "$HEAD_SHA" -- 'crates/**/*.rs' ':!crates/**/tests/**' > "$RUNNER_TEMP/cohort.diff"
+          actual_sha="$(sha256sum "$RUNNER_TEMP/cohort.diff" | awk '{print $1}')"
+          if [ "$actual_sha" != "$EXPECTED_DIFF_SHA" ]; then
+            echo "Cohort diff SHA mismatch: expected $EXPECTED_DIFF_SHA got $actual_sha" >&2
+            exit 1
+          fi
+      - name: Mutate cohort shard
+        id: run_mutants
         run: |
           set -uo pipefail
-          cargo mutants --in-diff "$RUNNER_TEMP/week.diff" --test-tool nextest \
-            --shard "${{ steps.diff.outputs.slice }}/48" --timeout-multiplier 3 --jobs 2 --output "$RUNNER_TEMP" || status=$?
+          cargo mutants \
+            --in-diff "$RUNNER_TEMP/cohort.diff" \
+            --test-tool nextest \
+            --sharding "$SHARDING_METHOD" \
+            --shard "${SHARD}/${SHARD_COUNT}" \
+            --timeout-multiplier 3 \
+            --jobs 2 \
+            --output "$RUNNER_TEMP" || status=$?
           status="${status:-0}"
-          # 0 all caught, 2 some missed, 3 some timed out: results, not failures.
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          # 0 all caught, 2 some missed, 3 some timed out: report-only results, not tool failures.
           case "$status" in 0|2|3) ;; *) echo "cargo-mutants failed (exit $status)"; exit "$status";; esac
-      - name: Summarise
-        if: always() && steps.diff.outputs.lines != '0'
+      - name: Record shard reconciliation payload
+        if: always()
         run: |
           set -euo pipefail
-          out="$RUNNER_TEMP/mutants.out"
-          count() { if [ -f "$out/$1" ]; then wc -l < "$out/$1"; else echo 0; fi; }
-          {
-            echo "Slice ${{ steps.diff.outputs.slice }}/48 since \`${{ steps.diff.outputs.base }}\`: caught $(count caught.txt), missed $(count missed.txt), timeout $(count timeout.txt), unviable $(count unviable.txt)"
-            if [ -s "$out/missed.txt" ]; then
-              echo
-              echo '```text'
-              head -100 "$out/missed.txt"
-              echo '```'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          upload="$RUNNER_TEMP/shard-upload"
+          mkdir -p "$upload"
+          python3 -c '
+          import json, os, sys
+          payload = {
+              "cohort_id": os.environ["COHORT_ID"],
+              "shard": int(os.environ["SHARD"]),
+              "diff_sha256": os.environ["EXPECTED_DIFF_SHA"],
+              "job_status": sys.argv[1],
+              "exit_code": int(sys.argv[2]) if sys.argv[2] else None,
+              "run_id": sys.argv[3],
+          }
+          with open(sys.argv[4], "w", encoding="utf-8") as fh:
+              json.dump(payload, fh, indent=2)
+          ' "${{ job.status }}" "${{ steps.run_mutants.outputs.exit_code }}" "${{ github.run_id }}" "$upload/shard-result.json"
+          if [ -d "$RUNNER_TEMP/mutants.out" ]; then
+            cp -R "$RUNNER_TEMP/mutants.out" "$upload/mutants.out"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && steps.diff.outputs.lines != '0'
+        if: always()
         with:
-          name: mutants-shard-${{ matrix.shard }}
-          path: ${{ runner.temp }}/mutants.out
+          name: mutants-shard-${{ matrix.assignment.cohort_id }}-${{ matrix.assignment.shard }}
+          path: ${{ runner.temp }}/shard-upload
           if-no-files-found: ignore
           retention-days: 30
 
+  reconcile:
+    name: Reconcile cohort coverage and publish manifest
+    needs: [plan, mutants]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mutants-plan
+          path: ${{ runner.temp }}/plan
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.plan.outputs.has_assignments == 'true'
+        with:
+          pattern: mutants-shard-*
+          path: ${{ runner.temp }}/results
+          merge-multiple: false
+      - name: Reconcile outcomes and write diagnostic summary
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/results" "$RUNNER_TEMP/next-state"
+          python3 scripts/ci/mutants_cohort.py reconcile \
+            --state-in "$RUNNER_TEMP/plan/planned-state.json" \
+            --assignments-in "$RUNNER_TEMP/plan/assignments.json" \
+            --results-dir "$RUNNER_TEMP/results" \
+            --state-out "$RUNNER_TEMP/next-state/cohort-state.json" \
+            --summary-out "$RUNNER_TEMP/next-state/diagnostic-summary.json" \
+            --markdown-out "$RUNNER_TEMP/next-state/summary.md" \
+            --run-id "${{ github.run_id }}"
+          cat "$RUNNER_TEMP/next-state/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutants-cohort-state
+          path: ${{ runner.temp }}/next-state
+          if-no-files-found: error
+          retention-days: 90
+
   report:
-    needs: mutants
+    needs: [plan, mutants, reconcile]
     if: always()
     permissions:
       issues: write
     uses: ./.github/workflows/reusable-report-red.yml
     with:
-      result: ${{ needs.mutants.result }}
-      detail: "the tool failed, not a missed mutant (those are report-only, in each shard's summary and artifact)"
+      result: ${{ (needs.plan.result == 'failure' || needs.mutants.result == 'failure' || needs.reconcile.result == 'failure') && 'failure' || 'success' }}
+      detail: "the tool or cohort reconciler failed, not a missed mutant (report-only diagnostics in mutants-cohort-state)"
