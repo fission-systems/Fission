@@ -85,7 +85,7 @@ impl PlatformMemory for WinHandleMemoryAdapter {
                     base_address: r.base_address,
                     size: r.size,
                     protection: MemoryProtection {
-                        read: !r.protection.0 == 0,
+                        read: r.is_readable(),
                         write: writable,
                         execute: executable,
                     },

@@ -44,24 +44,38 @@ impl MemoryRegion {
         address >= self.base_address && address < self.base_address + self.size as u64
     }
 
+    /// Base protection, with modifier bits (`PAGE_GUARD`, `PAGE_NOCACHE`,
+    /// `PAGE_WRITECOMBINE`) masked off so that equality checks against the
+    /// `PAGE_*` access constants are meaningful.
+    fn base_protection(&self) -> u32 {
+        self.protection.0 & 0xff
+    }
+
+    /// True if region is readable (any protection other than `PAGE_NOACCESS`).
+    pub fn is_readable(&self) -> bool {
+        use windows::Win32::System::Memory::*;
+        let p = self.base_protection();
+        p != PAGE_NOACCESS.0 && p != 0
+    }
+
     /// True if region is executable (any EXECUTE protection).
     pub fn is_executable(&self) -> bool {
         use windows::Win32::System::Memory::*;
-        let p = self.protection;
-        p == PAGE_EXECUTE
-            || p == PAGE_EXECUTE_READ
-            || p == PAGE_EXECUTE_READWRITE
-            || p == PAGE_EXECUTE_WRITECOPY
+        let p = self.base_protection();
+        p == PAGE_EXECUTE.0
+            || p == PAGE_EXECUTE_READ.0
+            || p == PAGE_EXECUTE_READWRITE.0
+            || p == PAGE_EXECUTE_WRITECOPY.0
     }
 
     /// True if region is writable (any WRITE protection).
     pub fn is_writable(&self) -> bool {
         use windows::Win32::System::Memory::*;
-        let p = self.protection;
-        p == PAGE_READWRITE
-            || p == PAGE_EXECUTE_READWRITE
-            || p == PAGE_WRITECOPY
-            || p == PAGE_EXECUTE_WRITECOPY
+        let p = self.base_protection();
+        p == PAGE_READWRITE.0
+            || p == PAGE_EXECUTE_READWRITE.0
+            || p == PAGE_WRITECOPY.0
+            || p == PAGE_EXECUTE_WRITECOPY.0
     }
 
     /// True if region is both writable and executable (common in packers / self-modifying code).
@@ -135,4 +149,41 @@ pub fn find_writable_executable_regions(process: HANDLE) -> Vec<MemoryRegion> {
         .into_iter()
         .filter(|r| r.state == MemoryState::Commit && r.is_writable_executable())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::System::Memory::{
+        PAGE_EXECUTE_READ, PAGE_GUARD, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READONLY,
+        PAGE_READWRITE,
+    };
+
+    fn region(protection: PAGE_PROTECTION_FLAGS) -> MemoryRegion {
+        MemoryRegion {
+            base_address: 0x1000,
+            allocation_base: 0x1000,
+            size: 0x1000,
+            state: MemoryState::Commit,
+            region_type: MemoryType::Private,
+            protection,
+            allocation_protection: protection,
+        }
+    }
+
+    #[test]
+    fn readable_protection_is_reported_for_real_page_flags() {
+        assert!(region(PAGE_READONLY).is_readable());
+        assert!(region(PAGE_READWRITE).is_readable());
+        assert!(region(PAGE_EXECUTE_READ).is_readable());
+        assert!(!region(PAGE_NOACCESS).is_readable());
+    }
+
+    #[test]
+    fn modifier_bits_do_not_hide_access_rights() {
+        let guarded = region(PAGE_PROTECTION_FLAGS(PAGE_READWRITE.0 | PAGE_GUARD.0));
+        assert!(guarded.is_readable());
+        assert!(guarded.is_writable());
+        assert!(!guarded.is_executable());
+    }
 }
