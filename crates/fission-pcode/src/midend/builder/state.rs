@@ -168,6 +168,12 @@ pub(crate) struct PreviewBuilder<'a> {
     /// leave the loop.
     pub(crate) instruction_loop_exit: Option<usize>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
+    /// Maximum bit width observed across entry-owned register reads for each
+    /// parameter index. Distinguishes unconfirmed `pointer_size` placeholders
+    /// inserted by `ensure_incoming_stack_param_binding` from genuine register
+    /// reads so subsequent sub-register reads never narrow a wider parameter
+    /// and subsequent wider reads widen an earlier sub-register read.
+    pub(crate) register_param_observed_max_bits: HashMap<usize, u32>,
     pub(crate) entry_arity: usize,
     /// Declaration-level fixed prefix for a variadic function, cached from
     /// the type context so register lowering does not repeatedly walk hints.

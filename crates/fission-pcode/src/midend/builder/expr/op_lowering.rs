@@ -862,6 +862,26 @@ impl<'a> PreviewBuilder<'a> {
                 self.coerce_integer_storage_view(lhs, op.inputs[0].size * 8, false),
                 self.coerce_integer_storage_view(rhs, op.inputs[1].size * 8, false),
             )
+        } else if matches!(op.opcode, PcodeOpcode::IntRight) {
+            (
+                self.coerce_signedness_sensitive_operand(lhs, &op.inputs[0], false),
+                self.coerce_varnode_storage_view(rhs, &op.inputs[1], false),
+            )
+        } else if matches!(op.opcode, PcodeOpcode::IntSRight) {
+            (
+                self.coerce_signedness_sensitive_operand(lhs, &op.inputs[0], true),
+                self.coerce_varnode_storage_view(rhs, &op.inputs[1], false),
+            )
+        } else if matches!(op.opcode, PcodeOpcode::IntDiv | PcodeOpcode::IntRem) {
+            (
+                self.coerce_signedness_sensitive_operand(lhs, &op.inputs[0], false),
+                self.coerce_signedness_sensitive_operand(rhs, &op.inputs[1], false),
+            )
+        } else if matches!(op.opcode, PcodeOpcode::IntSDiv | PcodeOpcode::IntSRem) {
+            (
+                self.coerce_signedness_sensitive_operand(lhs, &op.inputs[0], true),
+                self.coerce_signedness_sensitive_operand(rhs, &op.inputs[1], true),
+            )
         } else if is_comparison(op.opcode)
             && !matches!(
                 op.opcode,
@@ -953,16 +973,8 @@ impl<'a> PreviewBuilder<'a> {
         expr
     }
 
-    /// A comparison reads a storage view, not the whole carrier binding.
-    /// Keep the declaration wide for other uses and encode truncation/sign
-    /// interpretation on this read only. Unknown types provide no evidence.
-    pub(in crate::midend) fn coerce_integer_storage_view(
-        &self,
-        expr: PreHirExpr,
-        bits: u32,
-        signed: bool,
-    ) -> PreHirExpr {
-        let source_type = if let PreHirExpr::Var(name) = &expr {
+    fn lookup_expr_source_type(&self, expr: &PreHirExpr) -> NirType {
+        if let PreHirExpr::Var(name) = expr {
             self.temps
                 .get(name)
                 .or_else(|| self.params.values().find(|binding| binding.name == *name))
@@ -975,8 +987,56 @@ impl<'a> PreviewBuilder<'a> {
                 })
                 .unwrap_or(NirType::Unknown)
         } else {
-            expr_type(&expr)
-        };
+            expr_type(expr)
+        }
+    }
+
+    /// Preserve exact operand width and signedness for P-code operations whose
+    /// semantics depend on the sign or lane width (`INT_RIGHT`, `INT_SRIGHT`,
+    /// `INT_DIV`, `INT_SDIV`, `INT_REM`, `INT_SREM`).
+    pub(in crate::midend) fn coerce_signedness_sensitive_operand(
+        &self,
+        expr: PreHirExpr,
+        vn: &Varnode,
+        signed: bool,
+    ) -> PreHirExpr {
+        let expr = self.coerce_varnode_storage_view(expr, vn, signed);
+        if signed {
+            return expr;
+        }
+        let bits = vn.size.saturating_mul(8);
+        if bits == 0 || matches!(expr, PreHirExpr::Const(_, _)) {
+            return expr;
+        }
+        let source_type = self.lookup_expr_source_type(&expr);
+        if matches!(
+            source_type,
+            NirType::Int {
+                bits: source_bits,
+                signed: true,
+            } if source_bits == bits
+        ) {
+            return PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits,
+                    signed: false,
+                },
+                expr: Box::new(expr),
+            };
+        }
+        expr
+    }
+
+    /// A comparison reads a storage view, not the whole carrier binding.
+    /// Keep the declaration wide for other uses and encode truncation/sign
+    /// interpretation on this read only. Unknown types provide no evidence.
+    pub(in crate::midend) fn coerce_integer_storage_view(
+        &self,
+        expr: PreHirExpr,
+        bits: u32,
+        signed: bool,
+    ) -> PreHirExpr {
+        let source_type = self.lookup_expr_source_type(&expr);
         let needs_view = match source_type {
             NirType::Int {
                 bits: source_bits,

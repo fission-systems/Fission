@@ -122,13 +122,24 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn refine_register_param_type_from_varnode(&mut self, param_index: usize, vn: &Varnode) {
+        let new_bits = vn.size.saturating_mul(8);
+        if new_bits == 0 {
+            return;
+        }
+        let first_observed = !self
+            .register_param_observed_max_bits
+            .contains_key(&param_index);
+        let target_bits = *self
+            .register_param_observed_max_bits
+            .entry(param_index)
+            .and_modify(|max_bits| *max_bits = (*max_bits).max(new_bits))
+            .or_insert(new_bits);
         let Some(binding) = self.params.get_mut(&param_index) else {
             return;
         };
         if binding.surface_type_name.is_some() {
             return;
         }
-        let new_bits = vn.size.saturating_mul(8);
         let NirType::Int {
             bits: current_bits,
             signed,
@@ -136,13 +147,17 @@ impl<'a> PreviewBuilder<'a> {
         else {
             return;
         };
-        if new_bits == 0 || new_bits >= current_bits {
-            return;
-        }
-        binding.ty = NirType::Int {
-            bits: new_bits,
-            signed,
+        let should_update = if first_observed {
+            target_bits != current_bits
+        } else {
+            target_bits > current_bits
         };
+        if should_update {
+            binding.ty = NirType::Int {
+                bits: target_bits,
+                signed,
+            };
+        }
     }
 
     pub(in crate::midend::builder) fn classify_stack_slot_origin(

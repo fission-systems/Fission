@@ -5849,3 +5849,186 @@ fn systemv_join_restaged_rdi_recovers_after_dominating_call_and_rejects_unrestag
         "an unrestaged arm falling back to a clobbering call must reject rdi"
     );
 }
+
+fn sysv_x64_test_options() -> MlilPreviewOptions {
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.cspec_param_offsets = Some(vec![0x38, 0x30, 0x10, 0x08, 0x80, 0x88]);
+    options
+}
+
+#[test]
+fn register_param_preserves_max_width_when_subregister_read_follows_wide_read() {
+    let edi = register(0x38, 4);
+    let dil = register(0x38, 1);
+    let pcode = pcode_function(vec![block_at(0x1000, 0, vec![])]);
+    let options = sysv_x64_test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.entry_arity = 1;
+
+    assert_eq!(builder.register_param(&edi).as_deref(), Some("param_1"));
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 32,
+            signed: false
+        }
+    );
+
+    assert_eq!(builder.register_param(&dil).as_deref(), Some("param_1"));
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 32,
+            signed: false
+        },
+        "later sub-register %dil read must not narrow 32-bit param_1 to uchar"
+    );
+}
+
+#[test]
+fn register_param_widens_when_wide_read_follows_subregister_read() {
+    let dil = register(0x38, 1);
+    let edi = register(0x38, 4);
+    let pcode = pcode_function(vec![block_at(0x1000, 0, vec![])]);
+    let options = sysv_x64_test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.entry_arity = 1;
+
+    assert_eq!(builder.register_param(&dil).as_deref(), Some("param_1"));
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 8,
+            signed: false
+        }
+    );
+
+    assert_eq!(builder.register_param(&edi).as_deref(), Some("param_1"));
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 32,
+            signed: false
+        },
+        "subsequent 32-bit %edi read must widen earlier 8-bit param_1"
+    );
+}
+
+#[test]
+fn register_param_replaces_unconfirmed_stack_placeholder_then_widens_only() {
+    let edi = register(0x38, 4);
+    let dil = register(0x38, 1);
+    let pcode = pcode_function(vec![block_at(0x1000, 0, vec![])]);
+    let options = sysv_x64_test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.entry_arity = 7;
+
+    builder.ensure_incoming_stack_param_binding(
+        6,
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+    );
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 64,
+            signed: false
+        }
+    );
+
+    assert_eq!(builder.register_param(&edi).as_deref(), Some("param_1"));
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 32,
+            signed: false
+        },
+        "first observed register read must replace unconfirmed pointer_size placeholder"
+    );
+
+    assert_eq!(builder.register_param(&dil).as_deref(), Some("param_1"));
+    assert_eq!(
+        builder.params[&0].ty,
+        NirType::Int {
+            bits: 32,
+            signed: false
+        },
+        "later 8-bit read must not narrow confirmed 32-bit param_1"
+    );
+}
+
+#[test]
+fn int_right_on_wider_signed_carrier_coerces_to_unsigned_lane_view() {
+    let ecx_in_rcx = register(0x08, 4);
+    let out = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x9100,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let shift_op = op(
+        0,
+        PcodeOpcode::IntRight,
+        Some(out),
+        vec![ecx_in_rcx.clone(), constant_sized(3, 4)],
+    );
+    let pcode = pcode_function(vec![block_at(0x1000, 0, vec![shift_op.clone()])]);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.temps.insert(
+        "rcx".to_string(),
+        PreHirBinding {
+            name: "rcx".to_string(),
+            ty: NirType::Int {
+                bits: 64,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        },
+    );
+    let key = VarnodeKey::from(&register(0x08, 4));
+    builder
+        .explicit_merge_bindings
+        .insert((0, key), "rcx".to_string());
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 0,
+    });
+
+    let lowered = builder
+        .lower_binary_op(&shift_op, &mut HashSet::default())
+        .expect("lower IntRight");
+    assert_eq!(
+        lowered,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                expr: Box::new(PreHirExpr::Var("rcx".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(
+                3,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }
+    );
+}
