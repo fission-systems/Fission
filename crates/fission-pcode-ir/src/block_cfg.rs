@@ -11,6 +11,7 @@ type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
 
 const DUPLICATE_BLOCK_KEY_TAG: u64 = 0x8000_0000_0000_0000;
 
+/// Maps each block start address to the index of the first block that starts there.
 pub fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, usize> {
     let mut address_to_index = HashMap::default();
     for (idx, block) in pcode.blocks.iter().enumerate() {
@@ -19,6 +20,7 @@ pub fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, usize> 
     address_to_index
 }
 
+/// Returns one target key per block, using the start address for the first block at an address and an encoded duplicate key for later ones.
 pub fn build_block_target_keys(pcode: &PcodeFunction) -> Vec<u64> {
     let mut seen: HashMap<u64, u32> = HashMap::default();
     pcode
@@ -37,6 +39,7 @@ pub fn build_block_target_keys(pcode: &PcodeFunction) -> Vec<u64> {
         .collect()
 }
 
+/// Encodes a start address and a nonzero duplicate ordinal into a single block key.
 pub fn encode_duplicate_block_key(start_address: u64, ordinal: u32) -> u64 {
     debug_assert!(ordinal > 0);
     DUPLICATE_BLOCK_KEY_TAG
@@ -112,6 +115,7 @@ pub fn canonical_block_start_for_address(pcode: &PcodeFunction, address: u64) ->
         .then_some(start)
 }
 
+/// Returns the index of the block that contains `address`, if any.
 pub fn canonical_block_index_for_address(
     pcode: &PcodeFunction,
     address_to_index: &HashMap<u64, usize>,
@@ -121,6 +125,7 @@ pub fn canonical_block_index_for_address(
     address_to_index.get(&canonical).copied()
 }
 
+/// Returns the number of blocks beyond the first at each start address.
 pub fn duplicate_block_start_count(pcode: &PcodeFunction) -> usize {
     pcode
         .blocks
@@ -128,6 +133,7 @@ pub fn duplicate_block_start_count(pcode: &PcodeFunction) -> usize {
         .saturating_sub(build_address_to_index_map(pcode).len())
 }
 
+/// Builds the successor index list for each block from its terminator, the layout fallthrough, and recorded indirect successors.
 pub fn build_successor_index_map(
     pcode: &PcodeFunction,
     address_to_index: &HashMap<u64, usize>,
@@ -193,6 +199,7 @@ pub fn build_successor_index_map(
         .collect()
 }
 
+/// Builds the predecessor index list for each block from a successor list.
 pub fn build_predecessor_index_map(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let mut predecessors = vec![Vec::new(); successors.len()];
     for (idx, succs) in successors.iter().enumerate() {
@@ -203,12 +210,14 @@ pub fn build_predecessor_index_map(successors: &[Vec<usize>]) -> Vec<Vec<usize>>
     predecessors
 }
 
+/// Returns the index of the next block in layout order for each block, or `None` for the last block.
 pub fn build_layout_fallthrough_map(pcode: &PcodeFunction) -> Vec<Option<usize>> {
     (0..pcode.blocks.len())
         .map(|idx| (idx + 1 < pcode.blocks.len()).then_some(idx + 1))
         .collect()
 }
 
+/// Returns the control-flow op that terminates `block`, ignoring instruction-local branches.
 pub fn block_terminator_op(block: &crate::pcode::PcodeBasicBlock) -> Option<&PcodeOp> {
     let idx = block.ops.iter().enumerate().rposition(|(idx, op)| {
         let is_control = matches!(

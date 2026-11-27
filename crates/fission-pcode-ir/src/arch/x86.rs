@@ -14,10 +14,15 @@
 /// GPR index mapping:
 /// 0=rax 1=rcx 2=rdx 3=rbx 4=rsp 5=rbp 6=rsi 7=rdi 8..15=r8..r15
 pub const X86_REG_BASE: u64 = 0xA860_0000;
+/// Base UNIQUE-space offset for the XMM register range.
 pub const X86_XMM_BASE: u64 = 0xA868_0000;
+/// Base UNIQUE-space offset for the YMM register range.
 pub const X86_YMM_BASE: u64 = 0xA869_0000;
+/// Base UNIQUE-space offset for the segment register range.
 pub const X86_SEG_BASE: u64 = 0xA86A_0000;
+/// Base UNIQUE-space offset for the EFLAGS register bits.
 pub const X86_EFLAGS_BASE: u64 = 0xA86F_0000;
+/// UNIQUE-space offset of the MXCSR register.
 pub const X86_MXCSR_OFFSET: u64 = X86_EFLAGS_BASE + 0x100;
 
 /// Returns the canonical x86-64 GPR family index for any width alias.
