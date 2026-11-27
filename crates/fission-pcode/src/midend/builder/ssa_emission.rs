@@ -60,6 +60,53 @@ enum SsaEmissionError {
     UnrelatedValuesShareBinding(SsaValueId, SsaValueId),
 }
 
+impl SsaEmissionError {
+    #[allow(dead_code)]
+    fn into_structural_violation(
+        &self,
+        pass: &str,
+        revision: u64,
+    ) -> fission_midend_core::ir::StructuralViolation {
+        use fission_midend_core::ir::{IrInvariant, IrStage, StructuralViolation, ValidationSite};
+        let repro = format!("{self:?}");
+        match self {
+            Self::MissingBinding(id) => StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::BindingScope,
+                ValidationSite::SsaValue(*id),
+                format!("SSA value v{} is missing an emitted binding", id.0),
+                &repro,
+            ),
+            Self::InvalidEdge(from, to) => StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                ValidationSite::Edge {
+                    from: *from as u32,
+                    to: *to as u32,
+                },
+                format!("invalid out-of-SSA copy edge {from}->{to}"),
+                &repro,
+            ),
+            Self::UnrelatedValuesShareBinding(first, second) => StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::BindingScope,
+                ValidationSite::SsaValue(*first),
+                format!(
+                    "unrelated SSA values v{} and v{} share one emitted binding",
+                    first.0, second.0
+                ),
+                &repro,
+            ),
+        }
+    }
+}
+
 impl SsaEmissionPlan {
     fn validate(
         &self,
@@ -1244,7 +1291,7 @@ impl<'a> PreviewBuilder<'a> {
         successor: usize,
     ) -> Vec<PreHirStmt> {
         let copies = self.ssa_edge_copy_pairs(predecessor, successor);
-        schedule_parallel_copies(copies, |ty| {
+        let scheduled = schedule_parallel_copies(copies.clone(), |ty| {
             let name = self.next_unused_temp_binding_name(ty);
             self.temps.insert(
                 name.clone(),
@@ -1257,7 +1304,22 @@ impl<'a> PreviewBuilder<'a> {
                 },
             );
             name
-        })
+        });
+        if cfg!(debug_assertions)
+            || fission_midend_core::ir::ValidationMode::from_env()
+                == fission_midend_core::ir::ValidationMode::VerifyEach
+        {
+            if let Err(violation) = validate_parallel_copy_schedule(
+                &copies,
+                &scheduled,
+                "ssa_edge_copy_stmts",
+                0,
+                Some((predecessor as u32, successor as u32)),
+            ) {
+                debug_assert!(false, "invalid parallel-copy schedule: {violation}");
+            }
+        }
+        scheduled
     }
 
     pub(super) fn append_ssa_edge_copies(
@@ -1627,6 +1689,100 @@ fn ssa_piece_view(expr: PreHirExpr, size: u32) -> PreHirExpr {
     }
 }
 
+/// Verify that `scheduled` sequentially executes every parallel transfer
+/// `(dst, src)` in `copies` without clobbering any source before it is read.
+pub(crate) fn validate_parallel_copy_schedule(
+    copies: &[(String, String, NirType)],
+    scheduled: &[PreHirStmt],
+    pass: &str,
+    revision: u64,
+    edge: Option<(u32, u32)>,
+) -> Result<(), fission_midend_core::ir::StructuralViolation> {
+    use fission_midend_core::ir::{IrInvariant, IrStage, StructuralViolation, ValidationSite};
+    let site = match edge {
+        Some((from, to)) => ValidationSite::Edge { from, to },
+        None => ValidationSite::Function {
+            name: pass.to_string(),
+        },
+    };
+    let mut destinations = BTreeSet::new();
+    let mut env = BTreeMap::<String, String>::new();
+    for (dst, src, _) in copies {
+        if dst.is_empty() || src.is_empty() {
+            return Err(StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                site,
+                "parallel copy has empty source or destination binding",
+                &format!("copy ({dst:?}, {src:?})"),
+            ));
+        }
+        if !destinations.insert(dst.as_str()) {
+            return Err(StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                site,
+                format!("duplicate parallel-copy destination '{dst}'"),
+                &format!("duplicate dst {dst}"),
+            ));
+        }
+        env.insert(dst.clone(), dst.clone());
+        env.entry(src.clone()).or_insert_with(|| src.clone());
+    }
+
+    for stmt in scheduled {
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs),
+            rhs: PreHirExpr::Var(rhs),
+        } = stmt
+        else {
+            return Err(StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                site,
+                "parallel-copy schedule emitted non-variable-copy statement",
+                &format!("{stmt:?}"),
+            ));
+        };
+        let Some(val) = env.get(rhs).cloned() else {
+            return Err(StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                site,
+                format!("parallel-copy schedule reads uninitialized variable '{rhs}'"),
+                &format!("{lhs} = {rhs}"),
+            ));
+        };
+        env.insert(lhs.clone(), val);
+    }
+
+    for (dst, src, _) in copies {
+        let actual = env.get(dst).map(String::as_str);
+        if actual != Some(src.as_str()) {
+            return Err(StructuralViolation::new(
+                IrStage::SsaEmission,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                site,
+                format!(
+                    "parallel-copy schedule clobbered or missed '{dst}': expected initial value of '{src}', got {actual:?}"
+                ),
+                &format!("expected {dst}<-{src}, got {actual:?}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Preserve simultaneous reads on a CFG edge. Cycles snapshot an old
 /// destination before any overwrite. The fresh binding belongs to that edge.
 fn schedule_parallel_copies(
@@ -1837,5 +1993,89 @@ mod tests {
         for (name, expected) in [("a", 2), ("b", 3), ("c", 1), ("d", 1)] {
             assert_eq!(values[name], expected);
         }
+    }
+
+    #[test]
+    fn parallel_copy_schedule_validator_accepts_valid_and_rejects_malformed() {
+        let var_copy = |dst: &str, src: &str| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(dst.into()),
+            rhs: PreHirExpr::Var(src.into()),
+        };
+        let ty = type_from_size(8, false);
+        let cycle_pairs = vec![
+            ("a".into(), "b".into(), ty.clone()),
+            ("b".into(), "c".into(), ty.clone()),
+            ("c".into(), "a".into(), ty.clone()),
+            ("d".into(), "a".into(), ty.clone()),
+        ];
+        let scheduled = schedule_parallel_copies(cycle_pairs.clone(), |_| "tmp_saved".into());
+        assert!(
+            validate_parallel_copy_schedule(&cycle_pairs, &scheduled, "edge_copy", 1, Some((0, 1)))
+                .is_ok()
+        );
+
+        let swap_pairs = vec![
+            ("x".into(), "y".into(), ty.clone()),
+            ("y".into(), "x".into(), ty.clone()),
+        ];
+        let valid_swap = schedule_parallel_copies(swap_pairs.clone(), |_| "tmp_swap".into());
+        assert!(validate_parallel_copy_schedule(&swap_pairs, &valid_swap, "swap", 1, None).is_ok());
+
+        // Naive clobbering swap (`x = y; y = x`) loses original `x`.
+        let broken_swap = vec![var_copy("x", "y"), var_copy("y", "x")];
+        let err =
+            validate_parallel_copy_schedule(&swap_pairs, &broken_swap, "bad_swap", 2, Some((1, 2)))
+                .unwrap_err();
+        assert_eq!(
+            err.invariant,
+            fission_midend_core::ir::IrInvariant::ParallelCopySchedule
+        );
+        assert_eq!(
+            err.site,
+            fission_midend_core::ir::ValidationSite::Edge { from: 1, to: 2 }
+        );
+
+        // Duplicate destination copy.
+        let dup_dst = vec![
+            ("x".into(), "y".into(), ty.clone()),
+            ("x".into(), "z".into(), ty.clone()),
+        ];
+        let err = validate_parallel_copy_schedule(&dup_dst, &[], "dup_dst", 3, None).unwrap_err();
+        assert!(err.message.contains("duplicate parallel-copy destination"));
+
+        // Uninitialized temporary read.
+        let uninit = vec![var_copy("x", "uninit_tmp")];
+        let err = validate_parallel_copy_schedule(
+            &[("x".into(), "y".into(), ty.clone())],
+            &uninit,
+            "uninit",
+            4,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("uninitialized variable"));
+
+        // Non-copy statement rejected cleanly.
+        let non_copy = vec![PreHirStmt::Break];
+        let err = validate_parallel_copy_schedule(
+            &[("x".into(), "y".into(), ty)],
+            &non_copy,
+            "non_copy",
+            5,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("non-variable-copy statement"));
+
+        let emission_err = SsaEmissionError::MissingBinding(SsaValueId(9))
+            .into_structural_violation("ssa_emit", 6);
+        assert_eq!(
+            emission_err.stage,
+            fission_midend_core::ir::IrStage::SsaEmission
+        );
+        assert_eq!(
+            emission_err.invariant,
+            fission_midend_core::ir::IrInvariant::BindingScope
+        );
     }
 }

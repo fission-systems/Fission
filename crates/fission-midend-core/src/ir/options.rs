@@ -959,6 +959,8 @@ pub enum MlilPreviewError {
     UnsupportedExprPtrArithmetic,
     #[error("value lowering failed on varnode: unsupported memory-backed varnode")]
     UnsupportedExprMemoryBackedVarnode,
+    #[error("IR structural invariant violation")]
+    IrInvariantViolation,
 }
 
 impl MlilPreviewError {

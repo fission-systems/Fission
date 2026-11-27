@@ -1,10 +1,12 @@
 mod convert;
 mod function;
 mod prehir;
+mod validation;
 
 pub use convert::*;
 pub use function::*;
 pub use prehir::*;
+pub use validation::*;
 
 /// Convenience re-exports of genuinely shared substrate types (no embedded
 /// AST) from `fission-midend-core`, so callers within this crate can write

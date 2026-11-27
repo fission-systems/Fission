@@ -1,6 +1,7 @@
 use crate::midend::ir::MlilPreviewError;
 use crate::midend::pass::{AnalysisStore, InvariantBasis, NirFunc, NirPass, PassResult};
 use crate::midend::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
+use fission_midend_core::ir::{IrInvariant, IrInvariantSet, PassContract};
 use fission_midend_prehir::{PreHirStmt, pre_hir_body_expr_nodes_fit_budget};
 // ADR 0012: admission / SESE / collapse free-fns owned by midend-structuring.
 use fission_midend_structuring::{
@@ -26,6 +27,15 @@ impl NirPass for EarlyReturnPass {
     /// one conditional branch edge + one fall-through edge within a single block.
     fn invariant_basis(&self) -> InvariantBasis {
         InvariantBasis::EdgeClassification
+    }
+
+    fn contract(&self) -> PassContract {
+        PassContract::new(
+            IrInvariantSet::STRUCTURING_CFG,
+            IrInvariantSet::STRUCTURING_CFG
+                .union(IrInvariantSet::single(IrInvariant::StructuredControlExits)),
+            true,
+        )
     }
 
     fn run(
@@ -75,6 +85,10 @@ impl NirPass for IrreducibleReductionPass {
     /// invariant-based CFG transforms that do not depend on binary content.
     fn invariant_basis(&self) -> InvariantBasis {
         InvariantBasis::StronglyConnectedComponents
+    }
+
+    fn contract(&self) -> PassContract {
+        PassContract::default_cfg_mutating()
     }
 
     fn run(
@@ -396,6 +410,7 @@ fn try_alternative_structurings(
         function.body =
             crate::midend::structuring::finalize_structured_body(&protected, body.clone());
         fission_midend_normalize::normalize_hir_function(&mut function);
+        let _ = fission_midend_prehir::action_pipeline::take_last_pipeline_validation_error();
         let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut function.body);
         let cleaned = fission_midend_structuring::cleanup::finalize_post_layout_body(
             &protected,
@@ -768,6 +783,15 @@ impl NirPass for SeseStructuringPass {
         InvariantBasis::DominatorTree
     }
 
+    fn contract(&self) -> PassContract {
+        PassContract::new(
+            IrInvariantSet::STRUCTURING_CFG,
+            IrInvariantSet::STRUCTURING_CFG
+                .union(IrInvariantSet::single(IrInvariant::StructuredControlExits)),
+            true,
+        )
+    }
+
     fn run(
         &mut self,
         ir: &mut NirFunc<'_, '_>,
@@ -885,6 +909,14 @@ impl NirPass for OrphanGotoRepairPass {
     /// statement list, not on raw CFG edges or binary-specific data.
     fn invariant_basis(&self) -> InvariantBasis {
         InvariantBasis::PostStructuringCleanup
+    }
+
+    fn contract(&self) -> PassContract {
+        PassContract::new(
+            IrInvariantSet::STRUCTURING_CFG,
+            IrInvariantSet::STRUCTURING_OUTPUT,
+            true,
+        )
     }
 
     fn run(

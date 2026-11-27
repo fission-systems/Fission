@@ -23,6 +23,7 @@ pub(super) fn print_prehir_function(func: &fission_midend_prehir::PreHirFunction
 mod bootstrap_x86;
 mod calling_convention;
 mod clamp_dump;
+mod cross_pass_validation;
 mod entry_param_promotion;
 mod normalize_arith;
 mod normalize_defuse;

@@ -14,9 +14,19 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub(in crate::midend) use super::dynamic_guards::resolve_lifted_direct_call_target;
 
+use fission_midend_core::ir::{
+    IrInvariant, IrInvariantSet, IrStage, StructuralValidationReport, StructuralViolation,
+    ValidationSite, scalar_ssa_shape_error_to_violation, validate_cfg_edges,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ScalarSsaValidationError {
     Shape(ScalarSsaShapeError),
+    CfgEdgeMismatch {
+        block: u32,
+        neighbor: u32,
+        message: String,
+    },
     AddressSpaceGuardsMismatch,
     StoragePartitionsMismatch,
     MissingOperationOutput(SsaOpSite),
@@ -52,6 +62,11 @@ pub(super) enum ScalarSsaValidationError {
         expected: SsaStorageKey,
         actual: SsaStorageKey,
     },
+    MemoryPhiPredecessors {
+        block: u32,
+        expected: Vec<u32>,
+        actual: Vec<u32>,
+    },
     NonDominatingUse {
         site: SsaUseSite,
         value: SsaValueId,
@@ -61,9 +76,272 @@ pub(super) enum ScalarSsaValidationError {
         predecessor: u32,
         value: SsaValueId,
     },
+    InvalidDynamicGuardSite {
+        site: SsaOpSite,
+    },
+    InvalidOutOfSsaCopyEdge {
+        predecessor: u32,
+        successor: u32,
+    },
     DynamicGuardsMismatch,
     OutOfSsaCopiesMismatch,
     HighVariablesMismatch,
+}
+
+impl ScalarSsaValidationError {
+    pub(crate) fn into_structural_violation(
+        &self,
+        pass: &str,
+        revision: u64,
+    ) -> StructuralViolation {
+        let repro = format!("{self:?}");
+        match self {
+            Self::Shape(shape_err) => {
+                scalar_ssa_shape_error_to_violation(shape_err, pass, revision)
+            }
+            Self::CfgEdgeMismatch {
+                block,
+                neighbor,
+                message,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::CfgEdgeSymmetry,
+                ValidationSite::Edge {
+                    from: *block,
+                    to: *neighbor,
+                },
+                message.clone(),
+                &repro,
+            ),
+            Self::AddressSpaceGuardsMismatch | Self::StoragePartitionsMismatch => {
+                StructuralViolation::new(
+                    IrStage::ScalarSsa,
+                    pass,
+                    revision,
+                    IrInvariant::StorageAccessPieces,
+                    ValidationSite::Function {
+                        name: pass.to_string(),
+                    },
+                    format!("scalar SSA storage/guard mismatch: {self:?}"),
+                    &repro,
+                )
+            }
+            Self::MissingOperationOutput(site) => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::StorageAccessPieces,
+                ValidationSite::SsaOp(*site),
+                "missing operation output SSA pieces",
+                &repro,
+            ),
+            Self::MissingOperationInput(site) => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::StorageAccessPieces,
+                ValidationSite::SsaUse(*site),
+                "missing operation input SSA pieces",
+                &repro,
+            ),
+            Self::OperationPieceCount {
+                site,
+                expected,
+                actual,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::StorageAccessPieces,
+                ValidationSite::SsaOp(*site),
+                format!("operation piece count mismatch: expected {expected}, got {actual}"),
+                &repro,
+            ),
+            Self::UsePieceCount {
+                site,
+                expected,
+                actual,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::StorageAccessPieces,
+                ValidationSite::SsaUse(*site),
+                format!("use piece count mismatch: expected {expected}, got {actual}"),
+                &repro,
+            ),
+            Self::OperationStorageMismatch {
+                site,
+                expected,
+                actual,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::StorageAccessPieces,
+                ValidationSite::SsaOp(*site),
+                format!("operation storage mismatch: expected {expected:?}, got {actual:?}"),
+                &repro,
+            ),
+            Self::UseStorageMismatch {
+                site,
+                expected,
+                actual,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::StorageAccessPieces,
+                ValidationSite::SsaUse(*site),
+                format!("use storage mismatch: expected {expected:?}, got {actual:?}"),
+                &repro,
+            ),
+            Self::PhiPredecessors {
+                block,
+                expected,
+                actual,
+            }
+            | Self::MemoryPhiPredecessors {
+                block,
+                expected,
+                actual,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::PhiEdgeCoverage,
+                ValidationSite::Block { block: *block },
+                format!("phi predecessor coverage mismatch: expected {expected:?}, got {actual:?}"),
+                &repro,
+            ),
+            Self::PhiStorageMismatch {
+                block,
+                predecessor,
+                expected,
+                actual,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::PhiEdgeCoverage,
+                ValidationSite::Edge {
+                    from: *predecessor,
+                    to: *block,
+                },
+                format!("phi storage mismatch: expected {expected:?}, got {actual:?}"),
+                &repro,
+            ),
+            Self::NonDominatingUse { site, value } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::SsaShapeAndDominance,
+                ValidationSite::SsaUse(*site),
+                format!("value v{} does not dominate use", value.0),
+                &repro,
+            ),
+            Self::NonDominatingPhiOperand {
+                block,
+                predecessor,
+                value,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::SsaShapeAndDominance,
+                ValidationSite::Edge {
+                    from: *predecessor,
+                    to: *block,
+                },
+                format!(
+                    "phi operand v{} does not dominate predecessor block",
+                    value.0
+                ),
+                &repro,
+            ),
+            Self::InvalidDynamicGuardSite { site } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::EffectRepresentation,
+                ValidationSite::SsaOp(*site),
+                "dynamic guard refers to missing or unreachable p-code op",
+                &repro,
+            ),
+            Self::InvalidOutOfSsaCopyEdge {
+                predecessor,
+                successor,
+            } => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                ValidationSite::Edge {
+                    from: *predecessor,
+                    to: *successor,
+                },
+                "out-of-SSA copy edge does not exist in CFG",
+                &repro,
+            ),
+            Self::DynamicGuardsMismatch => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::EffectRepresentation,
+                ValidationSite::Function {
+                    name: pass.to_string(),
+                },
+                "dynamic guards diverged from canonical builder derivation",
+                &repro,
+            ),
+            Self::OutOfSsaCopiesMismatch => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::ParallelCopySchedule,
+                ValidationSite::Function {
+                    name: pass.to_string(),
+                },
+                "out-of-SSA copy list diverged from canonical builder derivation",
+                &repro,
+            ),
+            Self::HighVariablesMismatch => StructuralViolation::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariant::SsaShapeAndDominance,
+                ValidationSite::Function {
+                    name: pass.to_string(),
+                },
+                "HighVariable congruence sets diverged from canonical builder derivation",
+                &repro,
+            ),
+        }
+    }
+}
+
+pub(crate) fn validate_scalar_ssa_report(
+    pcode: &PcodeFunction,
+    successors: &[Vec<usize>],
+    predecessors: &[Vec<usize>],
+    ssa: &NirScalarSsa,
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+    pass: &str,
+    revision: u64,
+) -> Result<(), StructuralValidationReport> {
+    validate_scalar_ssa_with_context(pcode, successors, predecessors, ssa, options, type_context)
+        .map_err(|err| {
+            StructuralValidationReport::new(
+                IrStage::ScalarSsa,
+                pass,
+                revision,
+                IrInvariantSet::SCALAR_SSA_STAGE,
+                vec![err.into_structural_violation(pass, revision)],
+            )
+        })
 }
 
 #[derive(Debug)]
@@ -2058,6 +2336,28 @@ pub(super) fn validate_scalar_ssa_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<(), ScalarSsaValidationError> {
+    if let Some(first) = validate_cfg_edges(
+        pcode.blocks.len(),
+        successors,
+        predecessors,
+        IrStage::ScalarSsa,
+        "validate_scalar_ssa",
+        0,
+    )
+    .into_iter()
+    .next()
+    {
+        let (block, neighbor) = match first.site {
+            ValidationSite::Edge { from, to } => (from, to),
+            ValidationSite::Block { block } => (block, block),
+            _ => (0, 0),
+        };
+        return Err(ScalarSsaValidationError::CfgEdgeMismatch {
+            block,
+            neighbor,
+            message: first.message,
+        });
+    }
     ssa.validate_shape()
         .map_err(ScalarSsaValidationError::Shape)?;
     let dominance = Dominance::analyze(successors, predecessors);
@@ -2203,6 +2503,59 @@ pub(super) fn validate_scalar_ssa_with_context(
                     });
                 }
             }
+        }
+    }
+
+    for (&block, mem_phis) in &ssa.memory_phis {
+        let block_index = block as usize;
+        let mut expected: Vec<u32> = predecessors
+            .get(block_index)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|predecessor| dominance.reachable.contains(predecessor))
+            .map(|predecessor| predecessor as u32)
+            .collect();
+        expected.sort_unstable();
+        expected.dedup();
+        for phi in mem_phis {
+            let actual: Vec<u32> = phi
+                .operands
+                .iter()
+                .map(|operand| operand.predecessor)
+                .collect();
+            if actual != expected {
+                return Err(ScalarSsaValidationError::MemoryPhiPredecessors {
+                    block,
+                    expected: expected.clone(),
+                    actual,
+                });
+            }
+        }
+    }
+
+    for &site in ssa.dynamic_guards.keys() {
+        let block_index = site.block as usize;
+        let op_index = site.op as usize;
+        let valid_op = dominance.reachable.contains(&block_index)
+            && pcode
+                .blocks
+                .get(block_index)
+                .is_some_and(|block| op_index < block.ops.len());
+        if !valid_op {
+            return Err(ScalarSsaValidationError::InvalidDynamicGuardSite { site });
+        }
+    }
+
+    for copy in &ssa.out_of_ssa_copies {
+        let valid_edge = successors
+            .get(copy.predecessor as usize)
+            .is_some_and(|targets| targets.contains(&(copy.successor as usize)));
+        if !valid_edge {
+            return Err(ScalarSsaValidationError::InvalidOutOfSsaCopyEdge {
+                predecessor: copy.predecessor,
+                successor: copy.successor,
+            });
         }
     }
 
@@ -3876,6 +4229,181 @@ mod tests {
                 .map(|e| e.end_exclusive),
             Some(7),
             "{mem_cover:?}"
+        );
+    }
+
+    #[test]
+    fn scalar_ssa_report_rejects_all_malformed_mutants_and_accepts_valid_edge_cases() {
+        let opts = MlilPreviewOptions::default();
+
+        // 1. Valid overlapping storage + natural loop + irreducible two-entry CFG.
+        let irred_pcode = function(vec![
+            vec![copy(0x1000, register_sized(0, 8), Varnode::constant(10, 8))],
+            vec![copy(0x1010, register_sized(0, 4), Varnode::constant(20, 4))],
+            vec![
+                copy(0x1020, unique(0), register_sized(0, 4)),
+                copy(0x1024, unique_sized(8, 8), register_sized(0, 8)),
+            ],
+        ]);
+        // Entry 0 reaches both 1 and 2; cycle between 1 <-> 2 forms an irreducible SCC.
+        let irred_succs = vec![vec![1, 2], vec![2], vec![1]];
+        let irred_preds = vec![vec![], vec![0, 2], vec![0, 1]];
+        let irred_ssa = build_scalar_ssa(&irred_pcode, &irred_succs, &irred_preds);
+        assert!(
+            validate_scalar_ssa_report(
+                &irred_pcode,
+                &irred_succs,
+                &irred_preds,
+                &irred_ssa,
+                &opts,
+                None,
+                "ssa_valid_irred",
+                1,
+            )
+            .is_ok()
+        );
+
+        // 2. Mutant: CFG predecessor/successor asymmetry.
+        let bad_preds = vec![vec![], vec![0], vec![0, 1]];
+        let err = validate_scalar_ssa_report(
+            &irred_pcode,
+            &irred_succs,
+            &bad_preds,
+            &irred_ssa,
+            &opts,
+            None,
+            "ssa_cfg_asym",
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(err.violations[0].invariant, IrInvariant::CfgEdgeSymmetry);
+        assert!(!err.proves_semantic_equivalence());
+
+        // 3. Mutant: Out-of-bounds successor edge.
+        let oob_succs = vec![vec![1, 9], vec![2], vec![1]];
+        let err = validate_scalar_ssa_report(
+            &irred_pcode,
+            &oob_succs,
+            &irred_preds,
+            &irred_ssa,
+            &opts,
+            None,
+            "ssa_cfg_oob",
+            3,
+        )
+        .unwrap_err();
+        assert_eq!(err.violations[0].invariant, IrInvariant::CfgEdgeSymmetry);
+
+        // 4. Mutant: Memory phi predecessor mismatch.
+        let mut mem_phi_mutant = irred_ssa.clone();
+        mem_phi_mutant.memory_phis.insert(
+            1,
+            vec![fission_midend_core::ir::SsaMemoryPhiNode {
+                storage: SsaMemoryStorageKey {
+                    region: SsaMemoryRegion::Stack,
+                    space_id: 2,
+                    offset: -8,
+                    size: 4,
+                },
+                output: SsaMemoryValueId(0),
+                operands: Vec::new(),
+            }],
+        );
+        let err = validate_scalar_ssa_report(
+            &irred_pcode,
+            &irred_succs,
+            &irred_preds,
+            &mem_phi_mutant,
+            &opts,
+            None,
+            "ssa_mem_phi",
+            4,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err.violations[0].invariant,
+            IrInvariant::EffectRepresentation | IrInvariant::PhiEdgeCoverage
+        ));
+
+        // 5. Mutant: Invalid dynamic guard op site.
+        let mut guard_mutant = irred_ssa.clone();
+        let bad_site = SsaOpSite { block: 0, op: 99 };
+        guard_mutant.dynamic_guards.insert(
+            bad_site,
+            fission_midend_core::ir::SsaDynamicGuard {
+                site: bad_site,
+                kind: SsaDynamicGuardKind::Load,
+                effect: SsaMemoryEffect::Read,
+                region: None,
+                space_id: None,
+                minimum_offset: 0,
+                maximum_offset_exclusive: None,
+                step: 1,
+                precision: SsaGuardRangePrecision::Unknown,
+                call_target: None,
+                call_effect_source: None,
+            },
+        );
+        let err = validate_scalar_ssa_report(
+            &irred_pcode,
+            &irred_succs,
+            &irred_preds,
+            &guard_mutant,
+            &opts,
+            None,
+            "ssa_guard_site",
+            5,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.violations[0].invariant,
+            IrInvariant::EffectRepresentation
+        );
+
+        // 6. Mutant: Invalid out-of-SSA copy edge (not present in CFG).
+        let mut copy_mutant = irred_ssa.clone();
+        let some_val = copy_mutant.values[0].id;
+        let some_storage = copy_mutant.values[0].storage;
+        copy_mutant.out_of_ssa_copies.push(SsaOutOfSsaCopy {
+            successor: 0,
+            predecessor: 2,
+            storage: some_storage,
+            source: some_val,
+            destination: some_val,
+        });
+        let err = validate_scalar_ssa_report(
+            &irred_pcode,
+            &irred_succs,
+            &irred_preds,
+            &copy_mutant,
+            &opts,
+            None,
+            "ssa_copy_edge",
+            6,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.violations[0].invariant,
+            IrInvariant::ParallelCopySchedule
+        );
+
+        // 7. Mutant: Storage access piece size mismatch / missing address-space guard.
+        let mut storage_mutant = irred_ssa;
+        storage_mutant.address_spaces.clear();
+        let err = validate_scalar_ssa_report(
+            &irred_pcode,
+            &irred_succs,
+            &irred_preds,
+            &storage_mutant,
+            &opts,
+            None,
+            "ssa_storage_guard",
+            7,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.violations[0].invariant,
+            IrInvariant::StorageAccessPieces
         );
     }
 }
