@@ -16,10 +16,12 @@ mod signatures_bridge;
 
 pub use model::{
     BinaryIdentityReport, BinaryIdentitySummary, CodeViewSummary, DieCompatSummary, DieRawMatch,
-    EvidenceLocation, IDENTITY_SCHEMA_VERSION, IdentityDetection, IdentityEvidence, IdentityKind,
-    IdentityResourceSummary, IdentityScanLimits, IdentitySource, NegativeIdentityEvidence,
-    OverlayInfo, PeIdentitySummary, PeRichHeaderSummary, RichRecordSummary, SectionEntropy,
-    SuppressedDetection, WinApiCatalogSummary,
+    EntropyCoverageStatus, EntropyScanCoverage, EvidenceLocation, IDENTITY_SCHEMA_VERSION,
+    IdentityDetection, IdentityEvidence, IdentityKind, IdentityResourceSummary, IdentityScanLimits,
+    IdentitySource, NegativeIdentityEvidence, OverlayInfo, PackedScoreBreakdown,
+    PackedScoreComponent, PeIdentitySummary, PeRichHeaderSummary, PresentationTruncation,
+    RichRecordSummary, SectionEntropy, SectionScanCompleteness, SectionSkipReason,
+    SuppressedDetection, SuppressedScoreDeduction, WinApiCatalogSummary,
 };
 
 use fission_core::evidence_policy::EvidencePolicy;
@@ -27,7 +29,7 @@ use fission_core::evidence_policy::EvidencePolicy;
 use crate::loader::LoadedBinary;
 
 use entropy::{classify_executable_entropy, shannon_entropy};
-use evidence::EvidenceBudget;
+use evidence::{AnalysisEvidenceCollector, apply_presentation_caps};
 use model::{BinaryIdentityReport as Report, IdentityDetection as Det, SectionEntropy as SecEnt};
 use scoring::{distinct_evidence_sources, gate_high_for_kind};
 
@@ -35,22 +37,22 @@ const IDENTITY_POLICY: EvidencePolicy = EvidencePolicy::DEFAULT;
 
 #[must_use]
 pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
-    let section_entropy = scan_executable_entropy(binary, &limits);
+    let (section_entropy, entropy_coverage) = scan_executable_entropy(binary, &limits);
 
     let overlay_info = overlay::detect_overlay(binary);
 
     let resources = Some(resources::summarize_identity_resources());
 
-    let mut evidence_budget = EvidenceBudget::new(limits.max_evidence_items);
+    let mut evidence_collector = AnalysisEvidenceCollector::new();
     let mut detections = Vec::new();
 
-    pe::collect_pe_identity(binary, &limits, &mut detections, &mut evidence_budget);
+    pe::collect_pe_identity(binary, &limits, &mut detections, &mut evidence_collector);
 
     let pe_extra = pe_identity::summarize_pe_identity(binary);
 
     detections.extend(signatures_bridge::signature_pattern_identity(
         binary,
-        &mut evidence_budget,
+        &mut evidence_collector,
     ));
 
     let snapshot_before_die = detections.clone();
@@ -64,7 +66,7 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
             .clone()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "CodeView/PDB directory present".to_string());
-        evidence_budget.push_simple(
+        evidence_collector.push_simple(
             &mut ev,
             IdentitySource::DebugInfo,
             EvidenceLocation::None,
@@ -88,7 +90,7 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
 
     if let Some(ref o) = overlay_info {
         let mut ev = Vec::new();
-        evidence_budget.push_simple(
+        evidence_collector.push_simple(
             &mut ev,
             IdentitySource::Overlay,
             EvidenceLocation::FileOffset(o.file_offset_start),
@@ -112,22 +114,34 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
 
     let high_entropy_executable_sections = section_entropy
         .iter()
-        .filter(|s| s.classification == "high_entropy")
+        .filter(|s| {
+            s.completeness != SectionScanCompleteness::Skipped && s.classification == "high_entropy"
+        })
         .count();
 
     if high_entropy_executable_sections > 0 {
         let mut ev = Vec::new();
         for sec in section_entropy
             .iter()
-            .filter(|s| s.classification == "high_entropy")
+            .filter(|s| {
+                s.completeness != SectionScanCompleteness::Skipped
+                    && s.classification == "high_entropy"
+            })
             .take(8)
         {
-            evidence_budget.push_simple(
+            evidence_collector.push_simple(
                 &mut ev,
                 IdentitySource::Entropy,
                 EvidenceLocation::Section(sec.section.clone()),
                 "Executable section Shannon entropy above packing threshold",
-                format!("entropy={:.2}", sec.entropy),
+                format!(
+                    "entropy={:.2} idx={} va={:#x} sampled={}/{}",
+                    sec.entropy,
+                    sec.section_index,
+                    sec.virtual_address,
+                    sec.sampled_bytes,
+                    sec.declared_bytes
+                ),
             );
         }
         let distinct = distinct_evidence_sources(&ev);
@@ -167,46 +181,41 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
         binary,
         pdb_present,
         pe_debug_dirs_present,
-        high_entropy_executable_sections,
+        &entropy_coverage,
         &mut detections,
     );
 
-    let mut packed_score_base = 0.0_f32;
-    let p = IDENTITY_POLICY.packed;
-    if high_entropy_executable_sections > 0 {
-        packed_score_base += p.entropy_weight_per_section
-            * (high_entropy_executable_sections.min(p.entropy_section_cap) as f32);
-    }
-    if detections.iter().any(|d| d.kind == IdentityKind::Packer) {
-        packed_score_base += p.packer_present_bump;
-    }
-    if overlay_info.is_some() {
-        packed_score_base += p.overlay_bump;
-    }
-    packed_score_base = packed_score_base.min(1.0);
-
-    let packed_score = policy::packed_score_adjusted(
-        packed_score_base,
+    let packed_score_breakdown = policy::compute_packed_score(
         binary,
         pdb_present,
         pe_debug_dirs_present,
+        overlay_info.is_some(),
         high_entropy_executable_sections,
+        &entropy_coverage,
         &detections,
     );
 
     let compiler_conflicts = policy::compute_compiler_conflicts(&detections);
     let weak_signal_count = policy::weak_signal_count_for_summary(&detections);
 
-    detections.truncate(limits.max_detections);
-
-    let summary = policy::build_summary_policy(
+    let mut summary = policy::build_summary_policy(
         &detections,
         overlay_info.is_some(),
         high_entropy_executable_sections,
-        packed_score,
+        &entropy_coverage,
+        &packed_score_breakdown,
         compiler_conflicts,
         weak_signal_count,
+        false,
     );
+
+    let truncation = apply_presentation_caps(
+        &mut detections,
+        &summary,
+        &limits,
+        evidence_collector.internal_overflow(),
+    );
+    summary.presentation_truncated = truncation.truncated;
 
     Report {
         schema_version: IDENTITY_SCHEMA_VERSION,
@@ -214,6 +223,7 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
         die_raw_matches,
         suppressed_detections,
         section_entropy,
+        entropy_coverage,
         overlay: overlay_info,
         rich_header: Some(PeRichHeaderSummary {
             present: policy::pe_has_rich_header_probe(binary),
@@ -232,43 +242,192 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
         die_compat,
         pe: pe_extra,
         winapi_catalog,
+        packed_score_breakdown,
+        truncation,
         summary,
     }
 }
 
-fn scan_executable_entropy(binary: &LoadedBinary, limits: &IdentityScanLimits) -> Vec<SecEnt> {
+fn scan_executable_entropy(
+    binary: &LoadedBinary,
+    limits: &IdentityScanLimits,
+) -> (Vec<SecEnt>, EntropyScanCoverage) {
     let data = binary.data.as_slice();
     let mut budget = limits.max_scan_bytes;
     let mut out = Vec::new();
-    for sec in &binary.sections {
+    let mut executable_sections_total = 0usize;
+    let mut sections_complete = 0usize;
+    let mut sections_partial = 0usize;
+    let mut sections_skipped = 0usize;
+    let mut sections_out_of_bounds = 0usize;
+    let mut sections_skipped_budget = 0usize;
+    let mut declared_bytes_total = 0u64;
+    let mut eligible_bytes_total = 0u64;
+    let mut sampled_bytes_total = 0u64;
+
+    for (section_index, sec) in binary.sections.iter().enumerate() {
         if !sec.is_executable {
             continue;
         }
-        let size_u64 = sec.file_size.min(sec.virtual_size);
-        let size = usize::try_from(size_u64).unwrap_or(usize::MAX);
-        let start = usize::try_from(sec.file_offset).unwrap_or(usize::MAX);
-        if size == 0 || start >= data.len() {
+        executable_sections_total += 1;
+        let declared_bytes = sec.file_size.min(sec.virtual_size);
+        declared_bytes_total = declared_bytes_total.saturating_add(declared_bytes);
+
+        let start = usize::try_from(sec.file_offset).ok();
+        if declared_bytes == 0 {
+            sections_skipped += 1;
+            out.push(SecEnt {
+                section: sec.name.clone(),
+                section_index,
+                virtual_address: sec.virtual_address,
+                file_offset: sec.file_offset,
+                declared_bytes,
+                eligible_bytes: 0,
+                sampled_offset: None,
+                sampled_bytes: 0,
+                completeness: SectionScanCompleteness::Skipped,
+                skip_reason: Some(SectionSkipReason::ZeroDeclaredSize),
+                observed_entropy: None,
+                entropy: 0.0,
+                classification: "unscanned".to_string(),
+            });
             continue;
         }
-        let avail = data.len().saturating_sub(start);
-        let take = size.min(avail).min(budget);
-        if take == 0 {
+
+        let Some(start) = start.filter(|&off| off < data.len()) else {
+            sections_skipped += 1;
+            sections_out_of_bounds += 1;
+            out.push(SecEnt {
+                section: sec.name.clone(),
+                section_index,
+                virtual_address: sec.virtual_address,
+                file_offset: sec.file_offset,
+                declared_bytes,
+                eligible_bytes: 0,
+                sampled_offset: None,
+                sampled_bytes: 0,
+                completeness: SectionScanCompleteness::Skipped,
+                skip_reason: Some(SectionSkipReason::FileOffsetOutOfBounds),
+                observed_entropy: None,
+                entropy: 0.0,
+                classification: "unscanned".to_string(),
+            });
+            continue;
+        };
+
+        let avail = (data.len() - start) as u64;
+        let eligible_bytes = declared_bytes.min(avail);
+        eligible_bytes_total = eligible_bytes_total.saturating_add(eligible_bytes);
+
+        if budget == 0 {
+            sections_skipped += 1;
+            sections_skipped_budget += 1;
+            out.push(SecEnt {
+                section: sec.name.clone(),
+                section_index,
+                virtual_address: sec.virtual_address,
+                file_offset: sec.file_offset,
+                declared_bytes,
+                eligible_bytes,
+                sampled_offset: None,
+                sampled_bytes: 0,
+                completeness: SectionScanCompleteness::Skipped,
+                skip_reason: Some(SectionSkipReason::ScanBudgetExhausted),
+                observed_entropy: None,
+                entropy: 0.0,
+                classification: "unscanned".to_string(),
+            });
             continue;
         }
+
+        let take = usize::try_from(eligible_bytes)
+            .unwrap_or(usize::MAX)
+            .min(budget);
         let slice = &data[start..start + take];
         budget = budget.saturating_sub(take);
         let e = shannon_entropy(slice);
         let class = classify_executable_entropy(e);
+        let sampled_bytes = take as u64;
+        sampled_bytes_total = sampled_bytes_total.saturating_add(sampled_bytes);
+
+        let (completeness, skip_reason) = if sampled_bytes == declared_bytes {
+            sections_complete += 1;
+            (SectionScanCompleteness::Complete, None)
+        } else if eligible_bytes < declared_bytes && sampled_bytes == eligible_bytes {
+            sections_partial += 1;
+            (
+                SectionScanCompleteness::Partial,
+                Some(SectionSkipReason::FileRangeTruncated),
+            )
+        } else {
+            sections_partial += 1;
+            sections_skipped_budget += 1;
+            (
+                SectionScanCompleteness::Partial,
+                Some(SectionSkipReason::ScanBudgetExhausted),
+            )
+        };
+
         out.push(SecEnt {
             section: sec.name.clone(),
+            section_index,
+            virtual_address: sec.virtual_address,
+            file_offset: sec.file_offset,
+            declared_bytes,
+            eligible_bytes,
+            sampled_offset: Some(sec.file_offset),
+            sampled_bytes,
+            completeness,
+            skip_reason,
+            observed_entropy: Some(e),
             entropy: e,
             classification: class.to_string(),
         });
-        if budget == 0 {
-            break;
-        }
     }
-    out
+
+    let coverage_ratio = if declared_bytes_total == 0 {
+        0.0
+    } else {
+        (sampled_bytes_total as f64 / declared_bytes_total as f64).clamp(0.0, 1.0) as f32
+    };
+    let sufficient_for_absence_evidence = declared_bytes_total > 0
+        && sections_partial == 0
+        && sections_out_of_bounds == 0
+        && sections_skipped_budget == 0
+        && sampled_bytes_total == declared_bytes_total
+        && coverage_ratio >= IDENTITY_POLICY.packed.min_entropy_coverage_for_absence;
+    let high_entropy_count = out
+        .iter()
+        .filter(|s| {
+            s.completeness != SectionScanCompleteness::Skipped && s.classification == "high_entropy"
+        })
+        .count();
+    let status = if high_entropy_count > 0 {
+        EntropyCoverageStatus::HighEntropyObserved
+    } else if declared_bytes_total == 0 {
+        EntropyCoverageStatus::NoExecutableBytes
+    } else if sufficient_for_absence_evidence {
+        EntropyCoverageStatus::CompleteNoHighEntropy
+    } else {
+        EntropyCoverageStatus::IncompleteNoHighEntropyObserved
+    };
+
+    let coverage = EntropyScanCoverage {
+        status,
+        scan_budget_bytes: limits.max_scan_bytes,
+        executable_sections_total,
+        sections_complete,
+        sections_partial,
+        sections_skipped,
+        sections_out_of_bounds,
+        declared_bytes_total,
+        eligible_bytes_total,
+        sampled_bytes_total,
+        coverage_ratio,
+        sufficient_for_absence_evidence,
+    };
+
+    (out, coverage)
 }
 
 #[cfg(test)]

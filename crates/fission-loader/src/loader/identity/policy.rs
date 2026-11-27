@@ -7,8 +7,10 @@ use crate::detector::Confidence;
 use crate::loader::LoadedBinary;
 
 use super::model::{
-    BinaryIdentitySummary, DieRawMatch, EvidenceLocation, IdentityDetection, IdentityEvidence,
-    IdentityKind, IdentitySource, NegativeIdentityEvidence, SuppressedDetection,
+    BinaryIdentitySummary, DieRawMatch, EntropyCoverageStatus, EntropyScanCoverage,
+    EvidenceLocation, IdentityDetection, IdentityEvidence, IdentityKind, IdentitySource,
+    NegativeIdentityEvidence, PackedScoreBreakdown, PackedScoreComponent, SuppressedDetection,
+    SuppressedScoreDeduction,
 };
 use super::scoring::{distinct_evidence_sources, gate_high_for_kind};
 
@@ -55,13 +57,16 @@ pub(super) fn attach_negative_evidence_for_binary(
     binary: &LoadedBinary,
     pdb_present: bool,
     pe_debug_dirs_present: bool,
-    high_entropy_exec_sections: usize,
+    entropy_coverage: &EntropyScanCoverage,
     detections: &mut [IdentityDetection],
 ) {
     let rich_import_table =
         binary.iat_symbols.len() >= EVIDENCE_POLICY.auxiliary.import_table_rich_symbol_count;
     let normal_ep_text = entry_in_named_text(binary);
     let rich_present = pe_has_rich_header_probe(binary);
+    let confirmed_no_high_entropy = entropy_coverage.status
+        == EntropyCoverageStatus::CompleteNoHighEntropy
+        && entropy_coverage.sufficient_for_absence_evidence;
 
     for det in detections.iter_mut() {
         let mut neg = Vec::new();
@@ -93,13 +98,14 @@ pub(super) fn attach_negative_evidence_for_binary(
                 description: "Rich stub marker present near DOS header".to_string(),
             });
         }
-        if high_entropy_exec_sections == 0
+        if confirmed_no_high_entropy
             && matches!(det.kind, IdentityKind::Unknown)
             && det.name == "HighEntropyExecutableSections"
         {
             neg.push(NegativeIdentityEvidence {
                 source: IdentitySource::Entropy,
-                description: "No executable sections crossed entropy threshold".to_string(),
+                description: "Complete executable entropy scan found no sections above threshold"
+                    .to_string(),
             });
         }
         det.negative_evidence = neg;
@@ -299,44 +305,147 @@ fn die_category_to_kind(cat: &str) -> IdentityKind {
     }
 }
 
-pub(super) fn packed_score_adjusted(
-    base_packed_hints: f32,
+pub(super) fn compute_packed_score(
     binary: &LoadedBinary,
     pdb_present: bool,
     pe_debug_dirs_present: bool,
+    has_overlay: bool,
     high_entropy_exec_sections: usize,
+    entropy_coverage: &EntropyScanCoverage,
     detections: &[IdentityDetection],
-) -> f32 {
+) -> PackedScoreBreakdown {
     let p = EVIDENCE_POLICY.packed;
-    let mut score = base_packed_hints;
+    let mut positive_components = Vec::new();
+    let mut raw_base_score = 0.0_f32;
+
+    if high_entropy_exec_sections > 0 {
+        let counted = high_entropy_exec_sections.min(p.entropy_section_cap);
+        let delta = p.entropy_weight_per_section * (counted as f32);
+        raw_base_score += delta;
+        positive_components.push(PackedScoreComponent {
+            name: "high_entropy_executable_sections".to_string(),
+            delta,
+            reason: format!(
+                "{high_entropy_exec_sections} executable section(s) above high-entropy threshold (capped at {counted})"
+            ),
+        });
+    }
+    if detections.iter().any(|d| d.kind == IdentityKind::Packer) {
+        raw_base_score += p.packer_present_bump;
+        positive_components.push(PackedScoreComponent {
+            name: "packer_detection_present".to_string(),
+            delta: p.packer_present_bump,
+            reason: "Static packer signature or section-layout hint present".to_string(),
+        });
+    }
+    if has_overlay {
+        raw_base_score += p.overlay_bump;
+        positive_components.push(PackedScoreComponent {
+            name: "trailing_overlay_present".to_string(),
+            delta: p.overlay_bump,
+            reason: "Unmapped trailing bytes present after last mapped section".to_string(),
+        });
+    }
+
+    let clamped_base_score = raw_base_score.min(1.0);
+    let mut score = clamped_base_score;
+    let mut negative_components = Vec::new();
+    let mut suppressed_deductions = Vec::new();
+
     if entry_in_named_text(binary) {
         score -= p.deduction_entry_in_text_section;
+        negative_components.push(PackedScoreComponent {
+            name: "entry_in_text_section".to_string(),
+            delta: -p.deduction_entry_in_text_section,
+            reason: "Entry point resides in conventional .text section".to_string(),
+        });
     }
     if binary.iat_symbols.len() >= EVIDENCE_POLICY.auxiliary.import_table_rich_symbol_count {
         score -= p.deduction_rich_import_table;
+        negative_components.push(PackedScoreComponent {
+            name: "rich_import_table".to_string(),
+            delta: -p.deduction_rich_import_table,
+            reason: format!(
+                "Import table has {} symbols (>= {})",
+                binary.iat_symbols.len(),
+                EVIDENCE_POLICY.auxiliary.import_table_rich_symbol_count
+            ),
+        });
     }
     if pdb_present || pe_debug_dirs_present {
         score -= p.deduction_debug_present;
+        negative_components.push(PackedScoreComponent {
+            name: "debug_metadata_present".to_string(),
+            delta: -p.deduction_debug_present,
+            reason: "PDB/CodeView or PE debug directory metadata present".to_string(),
+        });
     }
     if high_entropy_exec_sections == 0 {
-        score -= p.deduction_no_high_entropy_executable;
+        if entropy_coverage.status == EntropyCoverageStatus::CompleteNoHighEntropy
+            && entropy_coverage.sufficient_for_absence_evidence
+        {
+            score -= p.deduction_no_high_entropy_executable;
+            negative_components.push(PackedScoreComponent {
+                name: "no_high_entropy_executable_sections".to_string(),
+                delta: -p.deduction_no_high_entropy_executable,
+                reason: format!(
+                    "Complete executable entropy scan ({}/{} bytes across {} section(s)) observed no high-entropy code",
+                    entropy_coverage.sampled_bytes_total,
+                    entropy_coverage.declared_bytes_total,
+                    entropy_coverage.executable_sections_total
+                ),
+            });
+        } else {
+            suppressed_deductions.push(SuppressedScoreDeduction {
+                name: "no_high_entropy_executable_sections".to_string(),
+                skipped_delta: -p.deduction_no_high_entropy_executable,
+                reason: format!(
+                    "Suppressed absence deduction: coverage status {:?} ({}/{} declared bytes sampled, complete={}/{}, oob={})",
+                    entropy_coverage.status,
+                    entropy_coverage.sampled_bytes_total,
+                    entropy_coverage.declared_bytes_total,
+                    entropy_coverage.sections_complete,
+                    entropy_coverage.executable_sections_total,
+                    entropy_coverage.sections_out_of_bounds
+                ),
+            });
+        }
     }
     if detections.iter().any(|d| {
         d.kind == IdentityKind::Compiler
             && matches!(d.confidence, Confidence::Medium | Confidence::High)
     }) {
         score -= p.deduction_compiler_medium_or_high;
+        negative_components.push(PackedScoreComponent {
+            name: "compiler_medium_or_high".to_string(),
+            delta: -p.deduction_compiler_medium_or_high,
+            reason: "Corroborated Medium/High confidence compiler signal present".to_string(),
+        });
     }
-    score.max(0.0).min(1.0)
+
+    let adjusted_score = score.clamp(0.0, 1.0);
+
+    PackedScoreBreakdown {
+        policy_version: p.policy_version.to_string(),
+        semantics: "heuristic_layout_packing_indicator_not_malware_probability".to_string(),
+        raw_base_score,
+        clamped_base_score,
+        adjusted_score,
+        positive_components,
+        negative_components,
+        suppressed_deductions,
+    }
 }
 
 pub(super) fn build_summary_policy(
     detections: &[IdentityDetection],
     has_overlay: bool,
     high_entropy_executable_sections: usize,
-    packed_score: f32,
+    entropy_coverage: &EntropyScanCoverage,
+    packed_score_breakdown: &PackedScoreBreakdown,
     compiler_conflicts: Vec<String>,
     weak_signal_count: usize,
+    presentation_truncated: bool,
 ) -> BinaryIdentitySummary {
     fn best_promoted_compiler(
         detections: &[IdentityDetection],
@@ -345,7 +454,7 @@ pub(super) fn build_summary_policy(
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Compiler && d.confidence >= min_conf)
-            .max_by_key(|d| d.confidence)
+            .max_by_key(|d| (d.confidence, d.score))
     }
 
     fn best_promoted_language(
@@ -355,7 +464,7 @@ pub(super) fn build_summary_policy(
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Language && d.confidence >= min_conf)
-            .max_by_key(|d| d.confidence)
+            .max_by_key(|d| (d.confidence, d.score))
     }
 
     fn best_promoted_linker(
@@ -365,7 +474,7 @@ pub(super) fn build_summary_policy(
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Linker && d.confidence >= min_conf)
-            .max_by_key(|d| d.confidence)
+            .max_by_key(|d| (d.confidence, d.score))
     }
 
     fn best_promoted_packer(
@@ -375,7 +484,7 @@ pub(super) fn build_summary_policy(
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Packer && d.confidence >= min_conf)
-            .max_by_key(|d| d.confidence)
+            .max_by_key(|d| (d.confidence, d.score))
     }
 
     let likely_compiler =
@@ -403,12 +512,15 @@ pub(super) fn build_summary_policy(
         likely_compiler,
         likely_linker,
         likely_packer,
-        packed_score,
+        packed_score: packed_score_breakdown.adjusted_score,
         has_overlay,
         high_entropy_executable_sections,
         confidence: summary_confidence,
         compiler_conflicts,
         weak_signal_count,
+        entropy_coverage_status: entropy_coverage.status,
+        packed_score_policy_version: packed_score_breakdown.policy_version.clone(),
+        presentation_truncated,
     }
 }
 

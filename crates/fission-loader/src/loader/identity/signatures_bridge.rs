@@ -4,7 +4,7 @@ use fission_signatures::{ApiTypeDatabase, SIGNATURE_DB, SIGNATURE_RESOURCES};
 
 use crate::loader::LoadedBinary;
 
-use super::evidence::EvidenceBudget;
+use super::evidence::AnalysisEvidenceCollector;
 use super::model::{
     EvidenceLocation, IdentityDetection, IdentityKind, IdentitySource, WinApiCatalogSummary,
 };
@@ -16,7 +16,7 @@ const ENTRY_PATTERN_WINDOW: usize = 512;
 #[must_use]
 pub(super) fn signature_pattern_identity(
     binary: &LoadedBinary,
-    evidence_budget: &mut EvidenceBudget,
+    evidence_budget: &mut AnalysisEvidenceCollector,
 ) -> Vec<IdentityDetection> {
     if !is_pe_format(&binary.format) {
         return Vec::new();

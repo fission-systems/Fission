@@ -182,11 +182,110 @@ pub struct WinApiCatalogSummary {
     pub symbols_not_in_catalog: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionScanCompleteness {
+    Complete,
+    Partial,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionSkipReason {
+    ScanBudgetExhausted,
+    ZeroDeclaredSize,
+    FileOffsetOutOfBounds,
+    FileRangeTruncated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntropyCoverageStatus {
+    HighEntropyObserved,
+    CompleteNoHighEntropy,
+    IncompleteNoHighEntropyObserved,
+    NoExecutableBytes,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SectionEntropy {
     pub section: String,
+    pub section_index: usize,
+    pub virtual_address: u64,
+    pub file_offset: u64,
+    pub declared_bytes: u64,
+    pub eligible_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampled_offset: Option<u64>,
+    pub sampled_bytes: u64,
+    pub completeness: SectionScanCompleteness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<SectionSkipReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_entropy: Option<f32>,
     pub entropy: f32,
     pub classification: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EntropyScanCoverage {
+    pub status: EntropyCoverageStatus,
+    pub scan_budget_bytes: usize,
+    pub executable_sections_total: usize,
+    pub sections_complete: usize,
+    pub sections_partial: usize,
+    pub sections_skipped: usize,
+    pub sections_out_of_bounds: usize,
+    pub declared_bytes_total: u64,
+    pub eligible_bytes_total: u64,
+    pub sampled_bytes_total: u64,
+    pub coverage_ratio: f32,
+    pub sufficient_for_absence_evidence: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackedScoreComponent {
+    pub name: String,
+    pub delta: f32,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SuppressedScoreDeduction {
+    pub name: String,
+    pub skipped_delta: f32,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackedScoreBreakdown {
+    pub policy_version: String,
+    pub semantics: String,
+    pub raw_base_score: f32,
+    pub clamped_base_score: f32,
+    pub adjusted_score: f32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub positive_components: Vec<PackedScoreComponent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub negative_components: Vec<PackedScoreComponent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub suppressed_deductions: Vec<SuppressedScoreDeduction>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PresentationTruncation {
+    pub max_detections: usize,
+    pub detections_total: usize,
+    pub detections_emitted: usize,
+    pub detections_omitted: usize,
+    pub summary_backing_detections_omitted: usize,
+    pub max_evidence_items: usize,
+    pub evidence_items_total_before_cap: usize,
+    pub evidence_items_emitted: usize,
+    pub evidence_items_omitted: usize,
+    pub truncated: bool,
+    pub summary_computed_before_truncation: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -240,6 +339,9 @@ pub struct BinaryIdentitySummary {
     pub compiler_conflicts: Vec<String>,
     #[serde(default)]
     pub weak_signal_count: usize,
+    pub entropy_coverage_status: EntropyCoverageStatus,
+    pub packed_score_policy_version: String,
+    pub presentation_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,6 +353,7 @@ pub struct BinaryIdentityReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub suppressed_detections: Vec<SuppressedDetection>,
     pub section_entropy: Vec<SectionEntropy>,
+    pub entropy_coverage: EntropyScanCoverage,
     pub overlay: Option<OverlayInfo>,
     pub rich_header: Option<PeRichHeaderSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,5 +364,7 @@ pub struct BinaryIdentityReport {
     pub pe: Option<PeIdentitySummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub winapi_catalog: Option<WinApiCatalogSummary>,
+    pub packed_score_breakdown: PackedScoreBreakdown,
+    pub truncation: PresentationTruncation,
     pub summary: BinaryIdentitySummary,
 }
