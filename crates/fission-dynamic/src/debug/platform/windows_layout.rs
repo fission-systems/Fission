@@ -23,8 +23,34 @@ pub(crate) struct PeHeaders {
     pub section_table_offset: usize,
     pub section_alignment: u32,
     pub file_alignment: u32,
+    pub size_of_image: u32,
     pub size_of_headers: u32,
     pub number_of_rva_and_sizes: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PeSectionHeaderInfo {
+    pub name: String,
+    pub virtual_size: u32,
+    pub virtual_address: u32,
+    pub raw_size: u32,
+    pub raw_pointer: u32,
+    pub characteristics: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AppendedImportSectionLayout {
+    pub new_section_header_offset: usize,
+    pub number_of_sections_offset: usize,
+    pub size_of_image_offset: usize,
+    pub import_dir_offset: usize,
+    pub iat_dir_offset: Option<usize>,
+    pub alignment_padding_offset: usize,
+    pub alignment_padding_len: usize,
+    pub section_file_offset: usize,
+    pub section_raw_size: usize,
+    pub section_virtual_size: u32,
+    pub section_rva: u32,
 }
 
 const SECTION_HEADER_SIZE: usize = 40;
@@ -179,6 +205,7 @@ impl PeHeaders {
             section_table_offset: optional_offset + size_of_optional_header,
             section_alignment: field(optional_offset + 32)?,
             file_alignment: field(optional_offset + 36)?,
+            size_of_image: field(optional_offset + 56)?,
             size_of_headers: field(optional_offset + 60)?,
             number_of_rva_and_sizes: field(rva_count_offset)?,
         };
@@ -206,6 +233,34 @@ impl PeHeaders {
         }
         let first = self.optional_offset + if self.pe32_plus { 112 } else { 96 };
         Some(first + index * 8)
+    }
+
+    pub(crate) fn parse_sections(&self, bytes: &[u8]) -> Result<Vec<PeSectionHeaderInfo>, String> {
+        let mut out = Vec::with_capacity(self.number_of_sections as usize);
+        for index in 0..self.number_of_sections as usize {
+            let at = self.section_offset(index)?;
+            let name_bytes = bytes
+                .get(at..at + 8)
+                .ok_or("a section header is truncated")?;
+            let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
+            let name = String::from_utf8_lossy(&name_bytes[..end]).into_owned();
+            let virtual_size = read_u32(bytes, at + 8).ok_or("a section header is truncated")?;
+            let virtual_address =
+                read_u32(bytes, at + 12).ok_or("a section header is truncated")?;
+            let raw_size = read_u32(bytes, at + 16).ok_or("a section header is truncated")?;
+            let raw_pointer = read_u32(bytes, at + 20).ok_or("a section header is truncated")?;
+            let characteristics =
+                read_u32(bytes, at + 36).ok_or("a section header is truncated")?;
+            out.push(PeSectionHeaderInfo {
+                name,
+                virtual_size,
+                virtual_address,
+                raw_size,
+                raw_pointer,
+                characteristics,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -238,6 +293,13 @@ pub(crate) fn append_import_section(
     image: &mut Vec<u8>,
     imports: &[ImportSpec],
 ) -> Result<(), String> {
+    append_import_section_with_layout(image, imports).map(|_| ())
+}
+
+pub(crate) fn append_import_section_with_layout(
+    image: &mut Vec<u8>,
+    imports: &[ImportSpec],
+) -> Result<AppendedImportSectionLayout, String> {
     let headers = PeHeaders::parse(image)?;
     if headers.number_of_sections == 0 {
         return Err("the image has no sections to place a new one after".to_string());
@@ -343,13 +405,30 @@ pub(crate) fn append_import_section(
     write_u32(image, headers.optional_offset + 56, size_of_image)?;
     write_u32(image, import_dir, section_rva_u32)?;
     write_u32(image, import_dir + 4, descriptors_size as u32)?;
-    if let Some(iat_dir) = headers.data_directory_offset(DATA_DIRECTORY_IAT) {
+    let iat_dir_offset = headers.data_directory_offset(DATA_DIRECTORY_IAT);
+    if let Some(iat_dir) = iat_dir_offset {
         write_u32(image, iat_dir, 0)?;
         write_u32(image, iat_dir + 4, 0)?;
     }
-    image.resize(raw_pointer as usize, 0);
+    let alignment_padding_offset = image.len();
+    let section_file_offset = raw_pointer as usize;
+    let alignment_padding_len = section_file_offset.saturating_sub(alignment_padding_offset);
+    let section_raw_size = data.len();
+    image.resize(section_file_offset, 0);
     image.extend_from_slice(&data);
-    Ok(())
+    Ok(AppendedImportSectionLayout {
+        new_section_header_offset: new_header,
+        number_of_sections_offset: headers.nt_offset + 6,
+        size_of_image_offset: headers.optional_offset + 56,
+        import_dir_offset: import_dir,
+        iat_dir_offset,
+        alignment_padding_offset,
+        alignment_padding_len,
+        section_file_offset,
+        section_raw_size,
+        section_virtual_size: virtual_size,
+        section_rva: section_rva_u32,
+    })
 }
 
 /// One record of a thread's SEH chain.
