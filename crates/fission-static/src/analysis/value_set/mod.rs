@@ -5,7 +5,8 @@
 //! and constant propagation without full decompilation.
 
 use fission_pcode_ir::{PcodeFunction, PcodeOpcode, Varnode};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use std::hash::{Hash, Hasher};
 
 /// Represents the known possible states of a value during analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +175,7 @@ fn mask_abstract_value(val: AbstractValue, size: u32) -> AbstractValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VsaFact {
     DataRead {
         instruction_addr: u64,
@@ -193,13 +194,38 @@ pub enum VsaFact {
     },
 }
 
+/// Accounting counters for VSA fact accumulation and deduplication.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VsaFactStats {
+    pub total_emissions: u64,
+    pub unique_facts: usize,
+    pub duplicate_emissions: u64,
+    pub equality_checks: u64,
+}
+
+enum FactBucket {
+    Single(usize),
+    Many(Vec<usize>),
+}
+
+#[inline]
+fn hash_vsa_fact(fact: &VsaFact) -> u64 {
+    let mut hasher = FxHasher::default();
+    fact.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Computes Value Set Analysis over a Pcode function.
 #[derive(Default)]
 pub struct ValueSetAnalyzer {
     /// The abstract state at the beginning of each block.
     pub block_states: FxHashMap<usize, ValueState>,
-    /// Facts extracted during analysis
-    pub facts: Vec<VsaFact>,
+    /// Facts extracted during analysis, preserved in insertion order.
+    facts: Vec<VsaFact>,
+    /// Canonical hash index mapping `hash_vsa_fact(&fact)` to indices in `facts`.
+    fact_index: FxHashMap<u64, FactBucket>,
+    /// Instrumentation for total emissions, duplicates suppressed, and equality comparisons.
+    fact_stats: VsaFactStats,
 }
 
 impl ValueSetAnalyzer {
@@ -207,15 +233,80 @@ impl ValueSetAnalyzer {
         Self::default()
     }
 
+    /// Return extracted facts in deterministic insertion order.
+    pub fn facts(&self) -> &[VsaFact] {
+        &self.facts
+    }
+
+    /// Number of distinct extracted facts.
+    pub fn fact_count(&self) -> usize {
+        self.facts.len()
+    }
+
+    /// Return fact deduplication and comparison telemetry.
+    pub fn fact_stats(&self) -> VsaFactStats {
+        self.fact_stats
+    }
+
+    /// Insert a fact if not already present, maintaining canonical hash index consistency.
+    /// Returns `true` when inserted and `false` when an exact duplicate was suppressed.
+    pub fn push_fact(&mut self, fact: VsaFact) -> bool {
+        self.emit_fact(fact)
+    }
+
+    /// Clear all accumulated facts and reset the canonical hash index and counters.
+    pub fn clear_facts(&mut self) {
+        self.facts.clear();
+        self.fact_index.clear();
+        self.fact_stats = VsaFactStats::default();
+    }
+
     /// Record a fact unless this exact fact is already recorded. A block is
     /// evaluated again whenever its entry state grows, so the same load or
     /// indirect branch reaches here once per visit; the facts a visit adds
     /// that an earlier one did not (a wider target set, a new address) are
     /// still new facts and are kept.
-    fn emit_fact(&mut self, fact: VsaFact) {
-        if !self.facts.contains(&fact) {
-            self.facts.push(fact);
+    fn emit_fact(&mut self, fact: VsaFact) -> bool {
+        self.fact_stats.total_emissions += 1;
+        let hash = hash_vsa_fact(&fact);
+
+        if let Some(bucket) = self.fact_index.get_mut(&hash) {
+            match bucket {
+                FactBucket::Single(existing_idx) => {
+                    self.fact_stats.equality_checks += 1;
+                    if self.facts[*existing_idx] == fact {
+                        self.fact_stats.duplicate_emissions += 1;
+                        return false;
+                    }
+                    let new_idx = self.facts.len();
+                    let first_idx = *existing_idx;
+                    self.facts.push(fact);
+                    *bucket = FactBucket::Many(vec![first_idx, new_idx]);
+                    self.fact_stats.unique_facts = self.facts.len();
+                    return true;
+                }
+                FactBucket::Many(indices) => {
+                    for &idx in indices.iter() {
+                        self.fact_stats.equality_checks += 1;
+                        if self.facts[idx] == fact {
+                            self.fact_stats.duplicate_emissions += 1;
+                            return false;
+                        }
+                    }
+                    let new_idx = self.facts.len();
+                    self.facts.push(fact);
+                    indices.push(new_idx);
+                    self.fact_stats.unique_facts = self.facts.len();
+                    return true;
+                }
+            }
         }
+
+        let idx = self.facts.len();
+        self.facts.push(fact);
+        self.fact_index.insert(hash, FactBucket::Single(idx));
+        self.fact_stats.unique_facts = self.facts.len();
+        true
     }
 
     /// Converts all collected VSA facts into `Xref` instances.
@@ -672,8 +763,8 @@ mod tests {
         );
 
         assert_eq!(
-            analyzer.facts,
-            vec![VsaFact::JumpTableTarget {
+            analyzer.facts(),
+            &[VsaFact::JumpTableTarget {
                 instruction_addr: 0x1000,
                 targets: vec![0x401000],
                 pcode_op: PcodeOpcode::BranchInd,
