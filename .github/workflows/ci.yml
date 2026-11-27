@@ -197,6 +197,9 @@ jobs:
       - name: Release tooling tests
         run: python3 -m unittest discover -s scripts/release -p 'test_*.py'
 
+      - name: Verification oracle calibration tests
+        run: python3 -m unittest discover -s scripts/test -p 'test_*.py'
+
       - name: Install actionlint
         if: needs.changes.outputs.run_actionlint == 'true'
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

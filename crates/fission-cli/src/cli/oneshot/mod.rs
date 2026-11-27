@@ -1754,4 +1754,93 @@ mod verify_fields_tests {
         assert_eq!(empty_fields["sample_status"], "no_comparable_evidence");
         assert_eq!(empty_fields["samples"]["requested"], 0);
     }
+
+    #[test]
+    fn verify_outcome_serialization_never_promotes_faults_or_missing_evidence_to_pass() {
+        use fission_dir::{
+            ConcreteDiffReport, ConcreteDiffStatus, ConcreteSampleCounts, SampleErrorKind,
+            UnsupportedReason, VerifyOutcome,
+        };
+        use std::collections::BTreeMap;
+
+        let cases = [
+            (
+                VerifyOutcome::Diverged(vec![fission_dir::Divergence {
+                    run: Some(1),
+                    args: vec![42],
+                    prehir_result: Some(10),
+                    hir_result: Some(99),
+                    emulator_result: Some(10),
+                    detail: Some("HIR corruption".into()),
+                }]),
+                "diverged",
+            ),
+            (
+                VerifyOutcome::Suspect(vec![fission_dir::Divergence {
+                    run: Some(2),
+                    args: vec![7],
+                    prehir_result: Some(0),
+                    hir_result: Some(0),
+                    emulator_result: Some(0),
+                    detail: Some("recovered call prototype".into()),
+                }]),
+                "suspect",
+            ),
+            (
+                VerifyOutcome::Unsupported(UnsupportedReason::Harness("native crash".into())),
+                "harness",
+            ),
+            (
+                VerifyOutcome::Unsupported(UnsupportedReason::EmulatorSetup("bad image".into())),
+                "harness",
+            ),
+            (
+                VerifyOutcome::Unsupported(UnsupportedReason::ContainsLoop),
+                "unsupported",
+            ),
+            (
+                VerifyOutcome::Inconclusive {
+                    reason: "stale witness".into(),
+                },
+                "inconclusive",
+            ),
+        ];
+
+        for (outcome, expected_cat) in cases {
+            assert_eq!(outcome.category(), expected_cat);
+            assert!(!outcome.is_equivalent());
+            let reason = super::verify_outcome_reason(&outcome);
+            assert!(!reason.is_empty(), "non-passing outcome must explain why");
+            let fields = super::verify_outcome_fields(&outcome);
+            if matches!(
+                outcome,
+                VerifyOutcome::Diverged(_) | VerifyOutcome::Suspect(_)
+            ) {
+                assert_eq!(fields["counterexamples"].as_array().unwrap().len(), 1);
+            }
+        }
+
+        let asym_div = ConcreteDiffReport {
+            status: ConcreteDiffStatus::Diverged,
+            counts: ConcreteSampleCounts {
+                requested: 2,
+                comparable: 1,
+                agreed: 1,
+                divergent: 1,
+                symmetric_errors: 0,
+                asymmetric_errors: 1,
+                symmetric_error_reasons: BTreeMap::new(),
+                asymmetric_error_reasons: BTreeMap::from([(SampleErrorKind::FuelExhausted, 1)]),
+            },
+            outcome: VerifyOutcome::Diverged(vec![]),
+        };
+        assert!(asym_div.counts.reconciles());
+        let fields = super::concrete_diff_fields(&asym_div);
+        assert_eq!(fields["proved"], false);
+        assert_eq!(fields["sample_status"], "diverged");
+        assert_eq!(
+            fields["samples"]["asymmetric_error_reasons"]["fuel_exhausted"],
+            1
+        );
+    }
 }
