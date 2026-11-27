@@ -37,6 +37,28 @@ pub enum DynlinkMode {
     Interpreter,
 }
 
+/// Provenance and load mapping of one resolved shared library.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoadedLibIdentity {
+    pub soname: String,
+    pub canonical_path: PathBuf,
+    pub blake3: String,
+    pub base: u64,
+    pub bias: u64,
+    #[serde(default)]
+    pub needed: Vec<String>,
+}
+
+/// Strong-vs-strong global symbol collision observed during scope assembly.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SymbolConflict {
+    pub symbol: String,
+    pub chosen_module: String,
+    pub chosen_addr: u64,
+    pub shadowed_module: String,
+    pub shadowed_addr: u64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DynlinkInfo {
     pub mode: DynlinkMode,
@@ -53,6 +75,18 @@ pub struct DynlinkInfo {
     /// Shared libraries loaded by the mini-dynlink loop (soname → guest base).
     #[serde(default)]
     pub loaded_libs: Vec<(String, u64)>,
+    /// Full cryptographic identity and dependency metadata for each loaded module.
+    #[serde(default)]
+    pub loaded_lib_identities: Vec<LoadedLibIdentity>,
+    /// Standard runtime libraries absent from target roots that Linux HLE models.
+    #[serde(default)]
+    pub hle_modeled_libs: Vec<String>,
+    /// Dependency cycle edges observed and broken deterministically `(from, to)`.
+    #[serde(default)]
+    pub cycles_detected: Vec<(String, String)>,
+    /// Conflicting global definitions encountered during scope construction.
+    #[serde(default)]
+    pub symbol_conflicts: Vec<SymbolConflict>,
     /// Whether DF_BIND_NOW / DT_FLAGS_1 NOW was applied eagerly.
     #[serde(default)]
     pub bind_now: bool,
@@ -66,6 +100,8 @@ const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const EM_X86_64: u16 = 62;
 const EM_AARCH64: u16 = 183;
+/// Bound transitive shared library closure so cyclic or host-polluted graphs remain finite.
+const MAX_SHARED_LIBS: usize = 64;
 /// Preferred guest base for a PIE-style dynamic linker image.
 const DEFAULT_INTERP_BASE: u64 = 0x0000_5555_5555_0000;
 /// First guest base for DT_NEEDED shared libraries (grows upward).
@@ -380,6 +416,17 @@ pub fn should_skip_got_hle(binary: &LoadedBinary) -> bool {
 /// Returns info; on `Interpreter` mode also maps PT_LOAD segments of the
 /// interpreter and sets `interp_entry` for the process image entry override.
 pub fn prepare_dynlink(state: &mut MachineState, binary: &LoadedBinary) -> Result<DynlinkInfo> {
+    let search = lib_search_paths();
+    prepare_dynlink_with_search_paths(state, binary, &search)
+}
+
+/// Same as [`prepare_dynlink`], using caller-supplied target library search roots
+/// instead of global options/environment.
+pub fn prepare_dynlink_with_search_paths(
+    state: &mut MachineState,
+    binary: &LoadedBinary,
+    search_paths: &[PathBuf],
+) -> Result<DynlinkInfo> {
     let data = binary.inner().data.as_slice();
     let main_entry = binary.inner().entry_point;
     let interp = parse_pt_interp(data);
@@ -396,7 +443,7 @@ pub fn prepare_dynlink(state: &mut MachineState, binary: &LoadedBinary) -> Resul
 
     let machine = elf64_machine(data)?;
     match machine {
-        EM_X86_64 => prepare_dynlink_x86_64(state, binary, interp, has_got),
+        EM_X86_64 => prepare_dynlink_x86_64(state, binary, interp, has_got, search_paths),
         EM_AARCH64 => prepare_dynlink_aarch64(state, binary, interp),
         other => anyhow::bail!(
             "unsupported ELF e_machine {other} in dynamic-link path (expected x86-64 ({EM_X86_64}) or AArch64 ({EM_AARCH64}))"
@@ -409,6 +456,7 @@ fn prepare_dynlink_x86_64(
     binary: &LoadedBinary,
     guest_interp: Option<String>,
     has_got: bool,
+    search_paths: &[PathBuf],
 ) -> Result<DynlinkInfo> {
     let main_entry = binary.inner().entry_point;
 
@@ -430,9 +478,7 @@ fn prepare_dynlink_x86_64(
                             interp_base: mapped.base,
                             interp_entry: mapped.entry,
                             main_entry,
-                            loaded_libs: Vec::new(),
-                            bind_now: false,
-                            global_symbols: std::collections::HashMap::new(),
+                            ..Default::default()
                         });
                     }
                     Err(e) => {
@@ -451,37 +497,37 @@ fn prepare_dynlink_x86_64(
         }
     }
 
-    // Mini-dynlink: try DT_NEEDED shared lib load + BIND_NOW (no host ld.so required).
-    // Even when we fall back to HleGot, keep collected globals for lazy PLT resolve.
-    let mut hle_globals = std::collections::HashMap::new();
-    if has_got || guest_interp.is_some() {
-        match load_shared_libraries(state, binary) {
-            Ok(shared) if !shared.loaded_libs.is_empty() || shared.bind_now_applied => {
-                tracing::info!(
-                    "dynlink: SharedLibs mode — {} libs, bind_now={}, globals={}",
-                    shared.loaded_libs.len(),
-                    shared.bind_now_applied,
-                    shared.globals.len()
-                );
-                return Ok(DynlinkInfo {
-                    mode: DynlinkMode::SharedLibs,
-                    interp_path: guest_interp,
-                    host_interp_path: None,
-                    interp_base: 0,
-                    interp_entry: 0,
-                    main_entry,
-                    loaded_libs: shared.loaded_libs,
-                    // bind_now false when lazy mode forced even if DT flags say NOW
-                    bind_now: shared.bind_now_applied && !lazy_bind_enabled(),
-                    global_symbols: shared.globals,
-                });
-            }
-            Ok(shared) => {
-                hle_globals = shared.globals;
-            }
-            Err(e) => {
-                tracing::debug!("dynlink: shared lib load skipped: {e:#}");
-            }
+    // Mini-dynlink: discover transitive closure, map staged libs, build global
+    // scope, and apply validated relocations before mutating `state`.
+    let mut shared = SharedLoadResult::default();
+    if has_got
+        || guest_interp.is_some()
+        || !parse_dt_needed(binary.inner().data.as_slice()).0.is_empty()
+    {
+        shared = load_shared_libraries_with_paths(state, binary, search_paths)?;
+        if !shared.loaded_libs.is_empty() || shared.bind_now_applied {
+            tracing::info!(
+                "dynlink: SharedLibs mode — {} libs, bind_now={}, globals={}",
+                shared.loaded_libs.len(),
+                shared.bind_now_applied,
+                shared.globals.len()
+            );
+            return Ok(DynlinkInfo {
+                mode: DynlinkMode::SharedLibs,
+                interp_path: guest_interp,
+                host_interp_path: None,
+                interp_base: 0,
+                interp_entry: 0,
+                main_entry,
+                loaded_libs: shared.loaded_libs,
+                loaded_lib_identities: shared.identities,
+                hle_modeled_libs: shared.hle_modeled_libs,
+                cycles_detected: shared.cycles_detected,
+                symbol_conflicts: shared.symbol_conflicts,
+                // bind_now false when lazy mode forced even if DT flags say NOW
+                bind_now: shared.bind_now_applied && !lazy_bind_enabled(),
+                global_symbols: shared.globals,
+            });
         }
     }
 
@@ -493,8 +539,12 @@ fn prepare_dynlink_x86_64(
         interp_entry: 0,
         main_entry,
         loaded_libs: Vec::new(),
+        loaded_lib_identities: Vec::new(),
+        hle_modeled_libs: shared.hle_modeled_libs,
+        cycles_detected: shared.cycles_detected,
+        symbol_conflicts: shared.symbol_conflicts,
         bind_now: false,
-        global_symbols: hle_globals,
+        global_symbols: shared.globals,
     })
 }
 
@@ -534,6 +584,7 @@ fn prepare_dynlink_aarch64(
         loaded_libs: Vec::new(),
         bind_now: !lazy_bind_enabled(),
         global_symbols: globals,
+        ..Default::default()
     })
 }
 
@@ -584,12 +635,19 @@ fn elf64_has_pt_dynamic(data: &[u8]) -> Result<bool> {
 
 // ── DT_NEEDED shared library load loop ──────────────────────────────────────
 
+#[derive(Default)]
 struct SharedLoadResult {
     loaded_libs: Vec<(String, u64)>,
+    identities: Vec<LoadedLibIdentity>,
+    hle_modeled_libs: Vec<String>,
+    cycles_detected: Vec<(String, String)>,
+    symbol_conflicts: Vec<SymbolConflict>,
     bind_now_applied: bool,
     globals: std::collections::HashMap<String, u64>,
 }
 
+/// Configured target library roots only (`DynlinkOptions.lib_paths` then
+/// `FISSION_LIB_PATH`). Never falls back to unrestricted host system dirs.
 fn lib_search_paths() -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = DYNLINK_OPTIONS
         .get()
@@ -602,29 +660,52 @@ fn lib_search_paths() -> Vec<PathBuf> {
             }
         }
     }
-    for p in [
-        "/lib",
-        "/lib64",
-        "/usr/lib",
-        "/usr/lib64",
-        "/lib/x86_64-linux-gnu",
-        "/usr/lib/x86_64-linux-gnu",
-    ] {
-        paths.push(PathBuf::from(p));
-    }
     paths
 }
 
-fn find_library(soname: &str, search: &[PathBuf]) -> Option<PathBuf> {
-    // Absolute soname
-    let abs = PathBuf::from(soname);
-    if abs.is_file() {
-        return Some(abs);
+fn validate_soname_for_root_lookup(soname: &str) -> Result<()> {
+    if soname.is_empty()
+        || soname.contains('/')
+        || soname.contains('\\')
+        || soname.contains('\0')
+        || soname.contains("..")
+    {
+        anyhow::bail!("unsafe DT_NEEDED soname `{soname}` rejected by target-root policy");
+    }
+    Ok(())
+}
+
+fn is_hle_modeled_runtime_soname(soname: &str) -> bool {
+    const HLE_PREFIXES: &[&str] = &[
+        "libc.so",
+        "libc.musl-",
+        "libm.so",
+        "libpthread.so",
+        "libdl.so",
+        "librt.so",
+        "ld-linux",
+        "ld-musl",
+        "libgcc_s.so",
+    ];
+    HLE_PREFIXES.iter().any(|prefix| soname.starts_with(prefix))
+}
+
+/// Search only within configured target roots, verifying that canonicalized
+/// candidates do not escape the root directory (e.g. via symlinks or traversal).
+fn find_library_in_roots(soname: &str, search: &[PathBuf]) -> Option<PathBuf> {
+    if validate_soname_for_root_lookup(soname).is_err() {
+        return None;
     }
     for dir in search {
-        let cand = dir.join(soname);
-        if cand.is_file() {
-            return Some(cand);
+        let Ok(canon_dir) = std::fs::canonicalize(dir) else {
+            continue;
+        };
+        let cand = canon_dir.join(soname);
+        let Ok(canon_cand) = std::fs::canonicalize(&cand) else {
+            continue;
+        };
+        if canon_cand.starts_with(&canon_dir) && canon_cand.is_file() {
+            return Some(canon_cand);
         }
     }
     None
@@ -705,21 +786,30 @@ impl<'a> Elf<'a> {
     }
 }
 
-/// Parse DT_NEEDED sonames and bind-now flag from ELF dynamic section.
-pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
+const DT_SONAME: i64 = 14;
+const DT_VERSYM: i64 = 0x6fff_fff0;
+const DT_VERDEF: i64 = 0x6fff_fffc;
+const DT_VERNEED: i64 = 0x6fff_fffe;
+const STT_GNU_IFUNC: u8 = 10;
+const STV_DEFAULT: u8 = 0;
+const STV_PROTECTED: u8 = 3;
+const R_X86_64_IRELATIVE: u32 = 37;
+
+/// Parse DT_NEEDED, DT_SONAME, and bind-now flags safely from `PT_DYNAMIC`.
+fn parse_dynamic_deps_and_soname(data: &[u8]) -> (Vec<String>, Option<String>, bool) {
     let mut needed = Vec::new();
+    let mut soname = None;
     let mut bind_now = false;
     if data.len() < 64 || data[0..4] != [0x7f, b'E', b'L', b'F'] || data[4] != 2 || data[5] != 1 {
-        return (needed, bind_now);
+        return (needed, soname, bind_now);
     }
     let elf = Elf(data);
     let Some(dynamic) = elf.program_headers().find(|ph| ph.p_type == PT_DYNAMIC) else {
-        return (needed, bind_now);
+        return (needed, soname, bind_now);
     };
     let dyn_off = usize::try_from(dynamic.p_offset).unwrap_or(usize::MAX);
     let dyn_filesz = usize::try_from(dynamic.p_filesz).unwrap_or(usize::MAX);
 
-    // First pass: collect tags and find STRTAB via vaddr → file offset heuristic.
     let mut tags: Vec<(i64, u64)> = Vec::new();
     let mut i = 0usize;
     while i < dyn_filesz {
@@ -741,40 +831,75 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
         .find(|(t, _)| *t == DT_STRSZ)
         .map(|(_, v)| *v)
         .unwrap_or(0);
-
-    // Map STRTAB VA to file offset via PT_LOAD.
     let strtab_off = strtab_va.and_then(|va| vaddr_to_offset(data, va));
 
-    for (tag, val) in &tags {
-        if *tag == DT_FLAGS && (val & DF_BIND_NOW) != 0 {
+    let read_str = |val: u64| -> Option<String> {
+        let soff = strtab_off?;
+        if strsz == 0 {
+            return None;
+        }
+        let off = soff.checked_add(usize::try_from(val).ok()?)?;
+        elf.cstr(off)
+            .or_else(|| {
+                let tail = data.get(off..)?;
+                let tail = &tail[..tail.len().min(256)];
+                Some(String::from_utf8_lossy(tail).into_owned())
+            })
+            .filter(|s| !s.is_empty())
+    };
+
+    for &(tag, val) in &tags {
+        if tag == DT_FLAGS && (val & DF_BIND_NOW) != 0 {
             bind_now = true;
         }
-        if *tag == DT_FLAGS_1 && (val & DF_1_NOW) != 0 {
+        if tag == DT_FLAGS_1 && (val & DF_1_NOW) != 0 {
             bind_now = true;
         }
-        if *tag == DT_NEEDED {
-            if let (Some(soff), true) = (strtab_off, strsz > 0) {
-                let name = usize::try_from(*val)
-                    .ok()
-                    .and_then(|name| soff.checked_add(name))
-                    .and_then(|at| {
-                        // An unterminated name is read to the end of the
-                        // file, at most 256 bytes of it.
-                        elf.cstr(at).or_else(|| {
-                            let tail = data.get(at..)?;
-                            let tail = &tail[..tail.len().min(256)];
-                            Some(String::from_utf8_lossy(tail).into_owned())
-                        })
-                    });
-                if let Some(name) = name.filter(|name| !name.is_empty()) {
-                    needed.push(name);
-                }
+        if tag == DT_NEEDED {
+            if let Some(name) = read_str(val) {
+                needed.push(name);
             }
         }
+        if tag == DT_SONAME && soname.is_none() {
+            soname = read_str(val);
+        }
     }
-    // Mini-dynlink always does eager resolve (BIND_NOW policy).
+    // Mini-dynlink always uses eager BIND_NOW semantics when loading shared libs.
     let _ = bind_now;
-    (needed, true)
+    (needed, soname, true)
+}
+
+fn check_unsupported_symbol_versioning(data: &[u8], module: &str) -> Result<()> {
+    if data.len() < 64 {
+        return Ok(());
+    }
+    let elf = Elf(data);
+    let Some(dynamic) = elf.program_headers().find(|ph| ph.p_type == PT_DYNAMIC) else {
+        return Ok(());
+    };
+    let dyn_off = usize::try_from(dynamic.p_offset).unwrap_or(usize::MAX);
+    let dyn_filesz = usize::try_from(dynamic.p_filesz).unwrap_or(usize::MAX);
+    let mut i = 0usize;
+    while i < dyn_filesz {
+        let Some(entry) = dyn_off.checked_add(i).and_then(|at| elf.bytes(at, 16)) else {
+            break;
+        };
+        let tag = i64::from_le_bytes(entry[..8].try_into().unwrap());
+        if tag == DT_NULL {
+            break;
+        }
+        if matches!(tag, DT_VERSYM | DT_VERDEF | DT_VERNEED) {
+            anyhow::bail!("module `{module}` requires unsupported ELF symbol versioning (DT_VER*)");
+        }
+        i += 16;
+    }
+    Ok(())
+}
+
+/// Parse DT_NEEDED sonames and bind-now flag from ELF dynamic section.
+pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
+    let (needed, _, bind_now) = parse_dynamic_deps_and_soname(data);
+    (needed, bind_now)
 }
 
 fn vaddr_to_offset(data: &[u8], va: u64) -> Option<usize> {
@@ -792,64 +917,83 @@ fn vaddr_to_offset(data: &[u8], va: u64) -> Option<usize> {
         .filter(|offset| *offset < data.len())
 }
 
-/// The name and biased value of the 24-byte ELF64 symbol `sym`, if it is one
-/// a module exports: defined, global or weak, a function or an object.
-fn exported_symbol(
-    elf: Elf<'_>,
-    sym: &[u8],
-    (str_off, str_size): (usize, usize),
-    load_bias: u64,
-) -> Option<(String, u64)> {
-    let st_name = u32::from_le_bytes(sym[0..4].try_into().ok()?) as usize;
-    let st_info = sym[4];
-    let st_shndx = u16::from_le_bytes(sym[6..8].try_into().ok()?);
-    let st_value = u64::from_le_bytes(sym[8..16].try_into().ok()?);
-    if st_shndx == SHN_UNDEF || st_value == 0 {
-        return None;
-    }
-    let bind = st_info >> 4;
-    let ty = st_info & 0xf;
-    if bind != STB_GLOBAL && bind != STB_WEAK {
-        return None;
-    }
-    if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
-        return None;
-    }
-    if st_name >= str_size {
-        return None;
-    }
-    let name = elf.cstr(str_off.checked_add(st_name)?)?;
-    (!name.is_empty()).then(|| (name, st_value.saturating_add(load_bias)))
+fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::HashMap<String, u64> {
+    collect_module_exports(data, load_bias, "<main>", false)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, val, _bind)| (name, val))
+        .collect()
 }
 
-/// Every symbol of the table at `sym_off` (`count` entries of `entsz`
-/// bytes) that [`exported_symbol`] accepts; the first definition of a name
-/// wins.
-fn collect_exported(
+fn parse_dynsym_exports(
     elf: Elf<'_>,
     (sym_off, count, entsz): (usize, usize, usize),
-    strtab: (usize, usize),
+    (str_off, str_size): (usize, usize),
     load_bias: u64,
-    out: &mut std::collections::HashMap<String, u64>,
-) {
+    module: &str,
+    strict_ifunc: bool,
+    seen: &mut std::collections::HashSet<String>,
+    exports: &mut Vec<(String, u64, u8)>,
+) -> Result<()> {
     for index in 0..count {
         let Some(sym) = Elf::entry(sym_off, index, entsz).and_then(|at| elf.bytes(at, 24)) else {
             break;
         };
-        if let Some((name, value)) = exported_symbol(elf, sym, strtab, load_bias) {
-            out.entry(name).or_insert(value);
+        let st_name = u32::from_le_bytes(sym[0..4].try_into().unwrap()) as usize;
+        let st_info = sym[4];
+        let st_other = sym[5];
+        let st_shndx = u16::from_le_bytes(sym[6..8].try_into().unwrap());
+        let st_value = u64::from_le_bytes(sym[8..16].try_into().unwrap());
+        if st_shndx == SHN_UNDEF || st_value == 0 || st_name >= str_size {
+            continue;
+        }
+        let bind = st_info >> 4;
+        let ty = st_info & 0xf;
+        if bind != STB_GLOBAL && bind != STB_WEAK {
+            continue;
+        }
+        let visibility = st_other & 0x3;
+        if visibility != STV_DEFAULT && visibility != STV_PROTECTED {
+            continue;
+        }
+        let Some(name) = str_off
+            .checked_add(st_name)
+            .and_then(|off| elf.cstr(off))
+            .filter(|n| !n.is_empty())
+        else {
+            continue;
+        };
+        if ty == STT_GNU_IFUNC {
+            if strict_ifunc {
+                anyhow::bail!(
+                    "module `{module}` exports unsupported STT_GNU_IFUNC symbol `{name}`"
+                );
+            }
+            continue;
+        }
+        if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
+            continue;
+        }
+        if seen.insert(name.clone()) {
+            exports.push((name, st_value.saturating_add(load_bias), bind));
         }
     }
+    Ok(())
 }
 
-/// The global symbols a module defines, at the addresses they have once the
-/// module is loaded with `load_bias` added to its link addresses.
-fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::HashMap<String, u64> {
-    let mut out = std::collections::HashMap::new();
+fn collect_module_exports(
+    data: &[u8],
+    load_bias: u64,
+    module: &str,
+    strict_ifunc: bool,
+) -> Result<Vec<(String, u64, u8)>> {
+    let mut exports = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     if data.len() < 64 {
-        return out;
+        return Ok(exports);
     }
     let elf = Elf(data);
+
     let shoff = elf.size(40).unwrap_or(0);
     let shentsize = usize::from(elf.u16(58).unwrap_or(0));
     let shnum = usize::from(elf.u16(60).unwrap_or(0));
@@ -888,105 +1032,414 @@ fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::Hash
             ) else {
                 continue;
             };
-            collect_exported(
+            parse_dynsym_exports(
                 elf,
                 (sym_off, sym_size / entsz, entsz),
                 (str_off, str_size),
                 load_bias,
-                &mut out,
-            );
+                module,
+                strict_ifunc,
+                &mut seen,
+                &mut exports,
+            )?;
         }
     }
-    if out.is_empty() {
+    if exports.is_empty() {
         if let Ok(tables) = elf64_dynamic_tables(data) {
             if let (Some(sym_off), Some(strtab)) = (tables.symtab_offset, tables.strtab) {
                 let count = tables.symbol_count.unwrap_or(0);
                 let entsz = tables.sym_entry_size.max(24);
-                collect_exported(elf, (sym_off, count, entsz), strtab, load_bias, &mut out);
+                parse_dynsym_exports(
+                    elf,
+                    (sym_off, count, entsz),
+                    strtab,
+                    load_bias,
+                    module,
+                    strict_ifunc,
+                    &mut seen,
+                    &mut exports,
+                )?;
             }
         }
     }
-    out
+    Ok(exports)
 }
 
-/// Load DT_NEEDED libraries, collect globals, BIND_NOW-apply main RELA.
+struct DiscoveredModule {
+    soname: String,
+    canonical_soname: String,
+    canonical_path: PathBuf,
+    blake3: String,
+    bytes: Vec<u8>,
+    needed: Vec<String>,
+}
+
+struct MappedModule {
+    soname: String,
+    canonical_path: PathBuf,
+    blake3: String,
+    base: u64,
+    bias: u64,
+    bytes: Vec<u8>,
+    needed: Vec<String>,
+}
+
+fn reaches_in_graph(
+    edges: &std::collections::HashMap<String, Vec<String>>,
+    start: &str,
+    goal: &str,
+) -> bool {
+    if start == goal {
+        return true;
+    }
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    visited.insert(start);
+    queue.push_back(start);
+    while let Some(node) = queue.pop_front() {
+        if let Some(neighbors) = edges.get(node) {
+            for next in neighbors {
+                if next == goal {
+                    return true;
+                }
+                if visited.insert(next.as_str()) {
+                    queue.push_back(next.as_str());
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Phase 1: Bounded BFS transitive dependency closure within configured target
+/// search roots, detecting cycles and duplicate identities without mapping.
+fn discover_dependency_closure(
+    main_data: &[u8],
+    search_paths: &[PathBuf],
+) -> Result<(
+    Vec<DiscoveredModule>,
+    Vec<String>,
+    Vec<(String, String)>,
+    bool,
+)> {
+    check_unsupported_symbol_versioning(main_data, "<main>")?;
+    let (main_needed, _, bind_now) = parse_dynamic_deps_and_soname(main_data);
+
+    let mut discovered: Vec<DiscoveredModule> = Vec::new();
+    let mut visited_by_name: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut visited_by_identity: std::collections::HashMap<(PathBuf, String), usize> =
+        std::collections::HashMap::new();
+    let mut hle_modeled_libs: Vec<String> = Vec::new();
+    let mut cycles_detected: Vec<(String, String)> = Vec::new();
+    let mut edges: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut queue: std::collections::VecDeque<(String, String)> = main_needed
+        .into_iter()
+        .map(|dep| ("<main>".to_string(), dep))
+        .collect();
+
+    while let Some((requester, soname)) = queue.pop_front() {
+        validate_soname_for_root_lookup(&soname)
+            .with_context(|| format!("invalid dependency requested by `{requester}`"))?;
+
+        if let Some(&idx) = visited_by_name.get(&soname) {
+            let target_name = discovered[idx].canonical_soname.clone();
+            if reaches_in_graph(&edges, &target_name, &requester) {
+                cycles_detected.push((requester.clone(), target_name.clone()));
+            }
+            edges.entry(requester).or_default().push(target_name);
+            continue;
+        }
+
+        let Some(canonical_path) = find_library_in_roots(&soname, search_paths) else {
+            if is_hle_modeled_runtime_soname(&soname) {
+                if !hle_modeled_libs.contains(&soname) {
+                    hle_modeled_libs.push(soname);
+                }
+                continue;
+            }
+            anyhow::bail!(
+                "missing required shared library `{soname}` (needed by `{requester}`) in configured target library roots"
+            );
+        };
+
+        let lib_bin = LoadedBinary::from_file(&canonical_path)
+            .with_context(|| format!("load shared library {}", canonical_path.display()))?;
+        let blake3 = lib_bin.hash.clone();
+        let bytes = lib_bin.inner().data.as_slice().to_vec();
+        let machine = elf64_machine(&bytes)
+            .with_context(|| format!("validate ELF64 header of shared library `{soname}`"))?;
+        if machine != EM_X86_64 {
+            anyhow::bail!(
+                "shared library `{soname}` e_machine={machine} mismatch (expected {EM_X86_64})"
+            );
+        }
+        check_unsupported_symbol_versioning(&bytes, &soname)?;
+
+        if let Some(&idx) = visited_by_identity.get(&(canonical_path.clone(), blake3.clone())) {
+            let target_name = discovered[idx].canonical_soname.clone();
+            visited_by_name.insert(soname, idx);
+            if reaches_in_graph(&edges, &target_name, &requester) {
+                cycles_detected.push((requester.clone(), target_name.clone()));
+            }
+            edges.entry(requester).or_default().push(target_name);
+            continue;
+        }
+
+        if discovered.len() >= MAX_SHARED_LIBS {
+            anyhow::bail!(
+                "transitive shared library closure exceeded bound of {MAX_SHARED_LIBS} modules"
+            );
+        }
+
+        let (child_needed, dt_soname, _) = parse_dynamic_deps_and_soname(&bytes);
+        let canonical_soname = dt_soname.unwrap_or_else(|| soname.clone());
+        let idx = discovered.len();
+        visited_by_name.insert(soname.clone(), idx);
+        visited_by_name.insert(canonical_soname.clone(), idx);
+        visited_by_identity.insert((canonical_path.clone(), blake3.clone()), idx);
+        edges
+            .entry(requester)
+            .or_default()
+            .push(canonical_soname.clone());
+
+        for dep in &child_needed {
+            queue.push_back((canonical_soname.clone(), dep.clone()));
+        }
+
+        discovered.push(DiscoveredModule {
+            soname,
+            canonical_soname,
+            canonical_path,
+            blake3,
+            bytes,
+            needed: child_needed,
+        });
+    }
+
+    Ok((discovered, hle_modeled_libs, cycles_detected, bind_now))
+}
+
+/// Phase 2: Map every discovered library into `staged_state` in deterministic
+/// order while checking segment collisions against main image and earlier libs.
+fn map_discovered_libraries(
+    staged_state: &mut MachineState,
+    binary: &LoadedBinary,
+    discovered: Vec<DiscoveredModule>,
+) -> Result<Vec<MappedModule>> {
+    let mut occupied_ranges: Vec<(u64, u64, String)> = binary
+        .inner()
+        .sections
+        .iter()
+        .filter(|s| s.virtual_size > 0)
+        .map(|s| {
+            (
+                s.virtual_address,
+                s.virtual_address.saturating_add(s.virtual_size),
+                "<main>".to_string(),
+            )
+        })
+        .collect();
+
+    let mut mapped_modules = Vec::with_capacity(discovered.len());
+    let mut next_base = SHARED_LIB_BASE_START;
+
+    for module in discovered {
+        let mapped = map_elf64_segments(
+            staged_state,
+            &module.bytes,
+            next_base,
+            EM_X86_64,
+            &module.soname,
+            Some(&mut occupied_ranges),
+        )
+        .with_context(|| {
+            format!(
+                "map shared lib {} ({})",
+                module.soname,
+                module.canonical_path.display()
+            )
+        })?;
+        tracing::info!(
+            "dynlink: mapped `{}` from {} at base=0x{:X} (blake3={})",
+            module.soname,
+            module.canonical_path.display(),
+            mapped.base,
+            module.blake3
+        );
+        if mapped.bias != 0 {
+            let aligned_end = (mapped.max_end.saturating_add(0xFFF)) & !0xFFF;
+            next_base = next_base
+                .saturating_add(LIB_BASE_STRIDE)
+                .max(aligned_end.saturating_add(0x1000));
+        }
+        mapped_modules.push(MappedModule {
+            soname: module.soname,
+            canonical_path: module.canonical_path,
+            blake3: module.blake3,
+            base: mapped.base,
+            bias: mapped.bias,
+            bytes: module.bytes,
+            needed: module.needed,
+        });
+    }
+
+    Ok(mapped_modules)
+}
+
+/// Phase 3: Build complete deterministic global symbol scope across `[main, lib_1, ...]`
+/// enforcing visibility and strong-vs-weak rules while recording strong collisions.
+fn build_global_symbol_scope(
+    main_data: &[u8],
+    main_bias: u64,
+    mapped_modules: &[MappedModule],
+) -> Result<(std::collections::HashMap<String, u64>, Vec<SymbolConflict>)> {
+    let mut chosen: std::collections::HashMap<String, (u64, u8, String)> =
+        std::collections::HashMap::new();
+    let mut conflicts: Vec<SymbolConflict> = Vec::new();
+
+    let mut ingest = |module: &str, bytes: &[u8], bias: u64| -> Result<()> {
+        for (name, addr, bind) in collect_module_exports(bytes, bias, module, true)? {
+            match chosen.get(&name) {
+                None => {
+                    chosen.insert(name, (addr, bind, module.to_string()));
+                }
+                Some(&(prev_addr, prev_bind, ref prev_mod)) => {
+                    if prev_bind == STB_WEAK && bind == STB_GLOBAL {
+                        chosen.insert(name, (addr, bind, module.to_string()));
+                    } else if prev_bind == STB_GLOBAL && bind == STB_GLOBAL && prev_mod != module {
+                        conflicts.push(SymbolConflict {
+                            symbol: name,
+                            chosen_module: prev_mod.clone(),
+                            chosen_addr: prev_addr,
+                            shadowed_module: module.to_string(),
+                            shadowed_addr: addr,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    };
+
+    ingest("<main>", main_data, main_bias)?;
+    for module in mapped_modules {
+        ingest(&module.soname, &module.bytes, module.bias)?;
+    }
+
+    let globals = chosen
+        .into_iter()
+        .map(|(name, (addr, _, _))| (name, addr))
+        .collect();
+    Ok((globals, conflicts))
+}
+
+#[allow(dead_code)]
 fn load_shared_libraries(
     state: &mut MachineState,
     binary: &LoadedBinary,
 ) -> Result<SharedLoadResult> {
-    let mut staged_state = state.clone();
+    let search = lib_search_paths();
+    load_shared_libraries_with_paths(state, binary, &search)
+}
+
+/// Four-phase mini dynamic linker:
+/// 1. Discover bounded transitive closure (failing on missing required modules)
+/// 2. Map all modules into staged `MachineState` (checking range collisions)
+/// 3. Construct complete global symbol scope with visibility/conflict tracking
+/// 4. Validate and apply relocations for libraries and main before committing `state`.
+fn load_shared_libraries_with_paths(
+    state: &mut MachineState,
+    binary: &LoadedBinary,
+    search_paths: &[PathBuf],
+) -> Result<SharedLoadResult> {
     let main_data = binary.inner().data.as_slice();
     let main_base = binary.inner().image_base;
-    let (needed, bind_now) = parse_dt_needed(main_data);
-    let search = lib_search_paths();
-
-    // What is added to a module's link addresses to get where it is: the
-    // base for a position-independent image, nothing for an `ET_EXEC`, whose
-    // addresses are absolute already. The main image's symbols were biased
-    // by its base whichever it was, which offered a non-PIE executable's
-    // exports to its libraries at twice their address.
     let main_is_dyn = Elf(main_data).u16(16) == Some(ET_DYN);
     let main_bias = if main_is_dyn { main_base } else { 0 };
 
-    let mut loaded_libs = Vec::new();
-    let mut globals = collect_global_symbols(main_data, main_bias);
-    let mut next_base = SHARED_LIB_BASE_START;
+    // Phase 1: Bounded transitive closure discovery.
+    let (discovered, hle_modeled_libs, cycles_detected, bind_now) =
+        discover_dependency_closure(main_data, search_paths)?;
 
-    for soname in &needed {
-        let Some(host) = find_library(soname, &search) else {
-            tracing::debug!("dynlink: DT_NEEDED `{soname}` not found on host; skip");
-            continue;
-        };
-        let mapped = map_interpreter(&mut staged_state, &host, next_base, EM_X86_64)
-            .with_context(|| format!("map shared lib {}", host.display()))?;
-        let lib_bytes =
-            std::fs::read(&host).with_context(|| format!("read shared lib {}", host.display()))?;
-        // `mapped.bias`, not `mapped.base`: a library whose lowest segment
-        // is not at 0 -- a prelinked one -- is mapped at its link addresses,
-        // so its base is non-zero and its bias is zero. Using the base put
-        // every symbol and every relocated slot at twice the address.
-        let lib_globals = collect_global_symbols(&lib_bytes, mapped.bias);
-        // Prefer first definition (main then earlier libs).
-        for (k, v) in lib_globals {
-            globals.entry(k).or_insert(v);
-        }
-        // Apply RELATIVE inside the library itself.
-        let _ = apply_rela_x86_64(&mut staged_state, &lib_bytes, mapped.bias, |name| {
-            globals.get(name).copied()
+    // Phase 2: Map every discovered library into a staged state copy.
+    let mut staged_state = state.clone();
+    let mapped_modules = map_discovered_libraries(&mut staged_state, binary, discovered)?;
+
+    // Phase 3: Build global symbol scope across main and all mapped modules.
+    let (globals, symbol_conflicts) =
+        build_global_symbol_scope(main_data, main_bias, &mapped_modules)?;
+
+    // Phase 4: Strict relocation across libraries and main against complete scope.
+    let mut loaded_libs = Vec::with_capacity(mapped_modules.len());
+    let mut identities = Vec::with_capacity(mapped_modules.len());
+    for module in mapped_modules {
+        let _lib_stats = apply_rela_x86_64_strict(
+            &mut staged_state,
+            &module.bytes,
+            module.bias,
+            &module.soname,
+            |_| false,
+            |name| globals.get(name).copied(),
+        )
+        .with_context(|| format!("relocate shared library `{}`", module.soname))?;
+        loaded_libs.push((module.soname.clone(), module.base));
+        identities.push(LoadedLibIdentity {
+            soname: module.soname,
+            canonical_path: module.canonical_path,
+            blake3: module.blake3,
+            base: module.base,
+            bias: module.bias,
+            needed: module.needed,
         });
-        loaded_libs.push((soname.clone(), mapped.base));
-        next_base = next_base.saturating_add(LIB_BASE_STRIDE);
-        tracing::info!(
-            "dynlink: loaded `{}` from {} at base=0x{:X}",
-            soname,
-            host.display(),
-            mapped.base
-        );
     }
+
+    let has_hle_runtime = !hle_modeled_libs.is_empty();
+    let hle_got_only = loaded_libs.is_empty() && hle_modeled_libs.is_empty();
+    let iat_symbols = &binary.inner().iat_symbols;
+    let main_allows_hle_slot = |slot: u64| -> bool {
+        has_hle_runtime || (hle_got_only && iat_symbols.contains_key(&slot))
+    };
 
     let mut bind_now_applied = false;
     let eager = bind_now && !lazy_bind_enabled();
     if eager {
         // Eager BIND_NOW: RELATIVE + symbols found in loaded modules.
-        // Unresolved JUMP_SLOT left for LinuxEnv::patch_imports HLE trampolines.
-        let stats = apply_rela_x86_64(&mut staged_state, main_data, main_bias, |name| {
-            globals.get(name).copied()
-        })?;
+        // Main imports belonging to HLE-modeled runtime libs remain for patch_imports.
+        let stats = apply_rela_x86_64_strict(
+            &mut staged_state,
+            main_data,
+            main_bias,
+            "<main>",
+            main_allows_hle_slot,
+            |name| globals.get(name).copied(),
+        )
+        .context("relocate main ELF dynamic entries")?;
         bind_now_applied = stats.jump_slot > 0 || stats.relative > 0 || stats.glob_dat > 0;
     } else {
-        // Lazy mode: still apply RELATIVE (base fixups), leave JUMP_SLOT for lazy PLT.
-        let stats = apply_rela_x86_64(&mut staged_state, main_data, main_bias, |_name| None)?;
+        let stats = apply_rela_x86_64_strict(
+            &mut staged_state,
+            main_data,
+            main_bias,
+            "<main>",
+            |_| true,
+            |_name| None,
+        )
+        .context("apply RELATIVE fixups for lazy PLT mode")?;
         tracing::info!(
             "dynlink: lazy bind mode — applied {} RELATIVE, JUMP_SLOT deferred",
             stats.relative
         );
-        // Also apply RELATIVE for each already-mapped lib (done above in loop).
-        let _ = stats;
     }
 
     *state = staged_state;
     Ok(SharedLoadResult {
         loaded_libs,
+        identities,
+        hle_modeled_libs,
+        cycles_detected,
+        symbol_conflicts,
         bind_now_applied,
         globals,
     })
@@ -1048,6 +1501,7 @@ struct MappedInterp {
     /// image linked at 0, and 0 for one linked at an address of its own.
     bias: u64,
     entry: u64,
+    max_end: u64,
 }
 
 /// Map a host ELF interpreter into guest RAM at `preferred_base` (PIE-friendly).
@@ -1059,21 +1513,43 @@ fn map_interpreter(
 ) -> Result<MappedInterp> {
     let interp_bin =
         LoadedBinary::from_file(path).with_context(|| format!("load interp {}", path.display()))?;
-    let inner = interp_bin.inner();
-    let data = inner.data.as_slice();
-    let machine = elf64_machine(data).context("invalid ELF interpreter header")?;
+    let data = interp_bin.inner().data.as_slice();
+    map_elf64_segments(
+        state,
+        data,
+        preferred_base,
+        expected_machine,
+        &path.display().to_string(),
+        None,
+    )
+}
+
+fn map_elf64_segments(
+    state: &mut MachineState,
+    data: &[u8],
+    preferred_base: u64,
+    expected_machine: u16,
+    module_name: &str,
+    mut occupied_ranges: Option<&mut Vec<(u64, u64, String)>>,
+) -> Result<MappedInterp> {
+    let machine = elf64_machine(data).context("invalid ELF64 header")?;
     if machine != expected_machine {
+        if occupied_ranges.is_none() {
+            anyhow::bail!(
+                "interpreter architecture mismatch: e_machine={machine}, expected {expected_machine}"
+            );
+        }
         anyhow::bail!(
-            "interpreter architecture mismatch: e_machine={machine}, expected {expected_machine}"
+            "module `{module_name}` architecture mismatch: e_machine={machine}, expected {expected_machine}"
         );
     }
     let e_entry = u64::from_le_bytes(data[24..32].try_into().unwrap());
     let phoff = usize::try_from(u64::from_le_bytes(data[32..40].try_into().unwrap()))
-        .context("interpreter phoff overflows usize")?;
+        .context("ELF phoff overflows usize")?;
     let phentsize = u16::from_le_bytes(data[54..56].try_into().unwrap()) as usize;
     let phnum = u16::from_le_bytes(data[56..58].try_into().unwrap()) as usize;
     if phentsize < 56 {
-        anyhow::bail!("interpreter has invalid program-header size {phentsize}");
+        anyhow::bail!("module `{module_name}` has invalid program-header size {phentsize}");
     }
 
     let mut headers = Vec::with_capacity(phnum);
@@ -1087,9 +1563,7 @@ fn map_interpreter(
         let end = off
             .checked_add(56)
             .context("program-header bounds overflow")?;
-        let ph = data
-            .get(off..end)
-            .context("truncated interpreter program header")?;
+        let ph = data.get(off..end).context("truncated ELF program header")?;
         headers.push((
             u32::from_le_bytes(ph[0..4].try_into().unwrap()),
             u32::from_le_bytes(ph[4..8].try_into().unwrap()),
@@ -1111,33 +1585,44 @@ fn map_interpreter(
         }
     }
     if min_vaddr == u64::MAX {
-        anyhow::bail!("interpreter has no PT_LOAD");
+        anyhow::bail!("module `{module_name}` has no PT_LOAD");
     }
     let bias = if min_vaddr == 0 { preferred_base } else { 0 };
 
     let mut segments = Vec::new();
+    let mut max_end = 0u64;
     for &(p_type, p_flags, p_offset, p_vaddr, p_filesz, p_memsz) in &headers {
         if p_type != PT_LOAD {
             continue;
         }
         if p_memsz < p_filesz {
-            anyhow::bail!("interpreter PT_LOAD has p_memsz smaller than p_filesz");
+            anyhow::bail!("module `{module_name}` PT_LOAD has p_memsz smaller than p_filesz");
         }
-        let p_offset = usize::try_from(p_offset).context("interpreter file offset too large")?;
-        let p_filesz = usize::try_from(p_filesz).context("interpreter file size too large")?;
+        let p_offset = usize::try_from(p_offset).context("segment file offset too large")?;
+        let p_filesz = usize::try_from(p_filesz).context("segment file size too large")?;
         let file_end = p_offset
             .checked_add(p_filesz)
-            .context("interpreter segment file range overflow")?;
+            .context("segment file range overflow")?;
         if file_end > data.len() {
-            anyhow::bail!("interpreter PT_LOAD extends past end of file");
+            anyhow::bail!("module `{module_name}` PT_LOAD extends past end of file");
         }
         let guest_va = p_vaddr
             .checked_add(bias)
-            .context("interpreter segment address overflow")?;
-        guest_va
+            .context("segment address overflow")?;
+        let seg_end = guest_va
             .checked_add(p_memsz)
             .filter(|end| *end <= 1 << 47)
-            .context("interpreter segment does not fit the address space")?;
+            .context("segment does not fit the address space")?;
+        if let Some(existing) = occupied_ranges.as_deref() {
+            for &(o_start, o_end, ref owner) in existing {
+                if guest_va < o_end && o_start < seg_end {
+                    anyhow::bail!(
+                        "shared library `{module_name}` segment [0x{guest_va:X}, 0x{seg_end:X}) overlaps `{owner}` [0x{o_start:X}, 0x{o_end:X})"
+                    );
+                }
+            }
+        }
+        max_end = max_end.max(seg_end);
         let mut page_prot = prot::VALID | prot::READ;
         if p_flags & 2 != 0 {
             page_prot |= prot::WRITE;
@@ -1145,19 +1630,26 @@ fn map_interpreter(
         if p_flags & 1 != 0 {
             page_prot |= prot::EXEC;
         }
-        // The file's bytes only: the rest of `p_memsz` is zero without a
-        // host buffer of that size saying so.
-        segments.push((guest_va, p_memsz, page_prot, &data[p_offset..file_end]));
+        segments.push((
+            guest_va,
+            p_memsz,
+            seg_end,
+            page_prot,
+            &data[p_offset..file_end],
+        ));
     }
 
     let mut staged = state.clone();
-    for (guest_va, p_memsz, page_prot, bytes) in segments {
+    for (guest_va, p_memsz, seg_end, page_prot, bytes) in segments {
         staged
             .load_image_range(guest_va, p_memsz, bytes)
-            .with_context(|| format!("map interp segment at 0x{guest_va:X}"))?;
+            .with_context(|| format!("map segment of `{module_name}` at 0x{guest_va:X}"))?;
         staged
             .page_map
             .map_region(guest_va, p_memsz, page_prot, false);
+        if let Some(existing) = occupied_ranges.as_deref_mut() {
+            existing.push((guest_va, seg_end, module_name.to_string()));
+        }
     }
     *state = staged;
 
@@ -1165,6 +1657,7 @@ fn map_interpreter(
         base: if bias != 0 { bias } else { min_vaddr },
         bias,
         entry: e_entry.saturating_add(bias),
+        max_end,
     })
 }
 
@@ -1465,6 +1958,180 @@ pub fn apply_rela_x86_64(
         stats.glob_dat,
         stats.other
     );
+    Ok(stats)
+}
+
+/// Strict relocation pass for the mini-dynlink pipeline: validates every
+/// dynamic relocation record against the complete symbol scope, rejects
+/// unsupported relocation types/IFUNC, propagates missing required symbols,
+/// and stages all writes before updating `state`.
+fn apply_rela_x86_64_strict(
+    state: &mut MachineState,
+    elf_bytes: &[u8],
+    load_bias: u64,
+    module_name: &str,
+    allow_hle_slot: impl Fn(u64) -> bool,
+    mut resolve: impl FnMut(&str) -> Option<u64>,
+) -> Result<RelaApplyStats> {
+    let machine = elf64_machine(elf_bytes)?;
+    if machine != EM_X86_64 {
+        anyhow::bail!("module `{module_name}` e_machine={machine}, expected {EM_X86_64}");
+    }
+    let e_type = u16::from_le_bytes(elf_bytes[16..18].try_into().unwrap());
+    let effective_bias = if e_type == ET_DYN { load_bias } else { 0 };
+    let tables = match elf64_dynamic_tables(elf_bytes) {
+        Ok(t) => t,
+        Err(e) => {
+            if !elf64_has_pt_dynamic(elf_bytes)? {
+                return Ok(RelaApplyStats::default());
+            }
+            return Err(e).with_context(|| format!("invalid dynamic tables in `{module_name}`"));
+        }
+    };
+
+    let sym_off = tables.symtab_offset;
+    let strtab = tables.strtab;
+    let sym_entsz = tables.sym_entry_size.max(24);
+    let sym_count = tables.symbol_count;
+    let elf = Elf(elf_bytes);
+    let mut stats = RelaApplyStats::default();
+    let mut writes: Vec<(u64, u64)> = Vec::new();
+
+    let inspect_sym = |r_sym: usize| -> Result<(String, Option<u64>, u8, u8)> {
+        let Some(so) = sym_off else {
+            anyhow::bail!("module `{module_name}` relocation references symbol without DT_SYMTAB");
+        };
+        let Some((st_off, st_sz)) = strtab else {
+            anyhow::bail!("module `{module_name}` relocation references symbol without DT_STRTAB");
+        };
+        if let Some(count) = sym_count {
+            if r_sym >= count {
+                anyhow::bail!(
+                    "module `{module_name}` symbol index {r_sym} out of bounds (count={count})"
+                );
+            }
+        }
+        let Some(sym) = Elf::entry(so, r_sym, sym_entsz).and_then(|at| elf.bytes(at, 24)) else {
+            anyhow::bail!("module `{module_name}` symbol entry {r_sym} out of bounds");
+        };
+        let name_off = u32::from_le_bytes(sym[0..4].try_into().unwrap()) as usize;
+        if name_off >= st_sz {
+            anyhow::bail!("module `{module_name}` symbol name offset {name_off} out of bounds");
+        }
+        let name = st_off
+            .checked_add(name_off)
+            .and_then(|off| elf.cstr(off))
+            .with_context(|| {
+                format!("module `{module_name}` invalid symbol string for idx {r_sym}")
+            })?;
+        let st_info = sym[4];
+        let bind = st_info >> 4;
+        let ty = st_info & 0xf;
+        if ty == STT_GNU_IFUNC {
+            anyhow::bail!(
+                "module `{module_name}` relocation references unsupported STT_GNU_IFUNC symbol `{name}`"
+            );
+        }
+        let shndx = u16::from_le_bytes(sym[6..8].try_into().unwrap());
+        let val = u64::from_le_bytes(sym[8..16].try_into().unwrap());
+        let defined = if shndx == SHN_UNDEF {
+            None
+        } else if shndx == SHN_ABS {
+            Some(val)
+        } else {
+            Some(effective_bias.wrapping_add(val))
+        };
+        Ok((name, defined, bind, ty))
+    };
+
+    for &(range_offset, range_size) in &tables.rela_ranges {
+        let end = range_offset
+            .checked_add(range_size)
+            .context("x86-64 RELA range overflow")?;
+        let bytes = elf_bytes
+            .get(range_offset..end)
+            .with_context(|| format!("RELA range out of bounds in `{module_name}`"))?;
+        for relocation in bytes.chunks_exact(24) {
+            let r_offset = u64::from_le_bytes(relocation[0..8].try_into().unwrap());
+            let r_info = u64::from_le_bytes(relocation[8..16].try_into().unwrap());
+            let r_addend = i64::from_le_bytes(relocation[16..24].try_into().unwrap());
+            let r_type = (r_info & 0xffff_ffff) as u32;
+            let r_sym = (r_info >> 32) as usize;
+            let slot = effective_bias
+                .checked_add(r_offset)
+                .with_context(|| format!("relocation slot overflow in `{module_name}`"))?;
+
+            match r_type {
+                R_X86_64_NONE => {}
+                R_X86_64_RELATIVE => {
+                    if r_sym != 0 {
+                        anyhow::bail!(
+                            "invalid R_X86_64_RELATIVE in `{module_name}` at 0x{r_offset:X}: r_sym={r_sym}"
+                        );
+                    }
+                    writes.push((slot, (effective_bias as i64).wrapping_add(r_addend) as u64));
+                    stats.relative += 1;
+                }
+                R_X86_64_JUMP_SLOT | R_X86_64_GLOB_DAT | R_X86_64_64 => {
+                    if r_type == R_X86_64_64 && r_sym == 0 {
+                        writes.push((slot, effective_bias.wrapping_add(r_addend as u64)));
+                        stats.absolute += 1;
+                        continue;
+                    }
+                    let (name, defined_value, bind, _ty) = inspect_sym(r_sym)?;
+                    let bare = name.split('@').next().unwrap_or(&name);
+                    let target = if !bare.is_empty() {
+                        resolve(bare).or(defined_value)
+                    } else {
+                        defined_value
+                    };
+                    if let Some(target) = target {
+                        writes.push((slot, target.wrapping_add(r_addend as u64)));
+                        match r_type {
+                            R_X86_64_JUMP_SLOT => stats.jump_slot += 1,
+                            R_X86_64_GLOB_DAT => stats.glob_dat += 1,
+                            R_X86_64_64 => stats.absolute += 1,
+                            _ => unreachable!(),
+                        }
+                    } else if bind == STB_WEAK && defined_value.is_none() {
+                        writes.push((slot, 0));
+                        // Weak undefined symbols default to 0 without counting as a
+                        // loaded-module resolution that would flip HleGot -> SharedLibs.
+                        stats.unresolved += 1;
+                    } else if allow_hle_slot(slot)
+                        && (r_type == R_X86_64_JUMP_SLOT || r_type == R_X86_64_GLOB_DAT)
+                        && r_addend == 0
+                        && !bare.is_empty()
+                    {
+                        stats.unresolved += 1;
+                    } else {
+                        anyhow::bail!(
+                            "unresolved required symbol `{bare}` in `{module_name}` relocation (type={r_type}, slot=0x{slot:X})"
+                        );
+                    }
+                }
+                R_X86_64_IRELATIVE => {
+                    anyhow::bail!(
+                        "unsupported R_X86_64_IRELATIVE relocation in `{module_name}` at 0x{r_offset:X}"
+                    );
+                }
+                other => {
+                    anyhow::bail!(
+                        "unsupported x86-64 ELF relocation type {other} in `{module_name}` at 0x{r_offset:X}"
+                    );
+                }
+            }
+        }
+    }
+
+    let mut staged = state.clone();
+    let ram = staged.ram_space();
+    for (slot, val) in writes {
+        staged
+            .write_space(ram, slot, &val.to_le_bytes())
+            .with_context(|| format!("write relocation slot 0x{slot:X} for `{module_name}`"))?;
+    }
+    *state = staged;
     Ok(stats)
 }
 
@@ -2070,9 +2737,13 @@ mod tests {
         let data = testdata("x64_needs_prelinked.elf");
         let entry = u64::from_le_bytes(data[24..32].try_into().unwrap());
         let binary = LoadedBinary::from_bytes(data, "fixture".into()).unwrap();
+        let testdata_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata");
         let mut state = MachineState::new();
-        let shared = load_shared_libraries(&mut state, &binary).unwrap();
+        let shared =
+            load_shared_libraries_with_paths(&mut state, &binary, &[testdata_dir]).unwrap();
         assert_eq!(shared.globals.get("_start").copied(), Some(entry));
+        assert_eq!(shared.identities.len(), 1);
+        assert_eq!(shared.identities[0].soname, "x64_prelinked_lib.so");
     }
 
     /// Whatever a dynamic image's headers and tables say, reading them is
