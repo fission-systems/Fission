@@ -362,18 +362,18 @@ fn should_drop_inner_scalar_cast(
         return outer_signed == inner_signed;
     }
 
-    // A widening cast cannot discard an intermediate cast that changes the
-    // source's signedness.  For example, `u64((u32)i32_value)` must clear the
-    // upper 32 bits before widening; rewriting it to `u64(i32_value)` changes
-    // a negative low lane into an all-ones 64-bit value.  Keep the inner cast
-    // whenever its signedness is known to differ from the source expression.
-    let Some((_, source_signed)) = scalar_cast_signature(source_ty) else {
+    // A widening cast cannot discard an intermediate truncating or
+    // signedness-changing cast.  For example, `u64((u32)i32_value)` must clear
+    // upper bits before widening, and `u32((u8)u32_value)` must still truncate
+    // to 8 bits; keeping the inner cast whenever `source_bits > inner_bits` or
+    // `source_signed != inner_signed` preserves those semantics.
+    let Some((source_bits, source_signed)) = scalar_cast_signature(source_ty) else {
         // An unknown source type is not proof that the intermediate cast is
-        // redundant. Keep the old conservative behavior; the signed-lane
-        // case above is handled when the source signedness is known.
+        // redundant. Keep the old conservative behavior; known-type truncating
+        // and signed-lane cases are handled above.
         return false;
     };
-    if source_signed != inner_signed {
+    if source_bits > inner_bits || source_signed != inner_signed {
         return false;
     }
     true
@@ -506,5 +506,25 @@ mod tests {
             ty: u64_ty,
         };
         assert!(recognize_wide_integer_recombine(&signed_mod_low).is_none());
+    }
+
+    #[test]
+    fn widening_cast_keeps_truncating_unsigned_inner_cast() {
+        let u8_ty = int_ty(8, false);
+        let u32_ty = int_ty(32, false);
+        let wide_sum = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Var("y".to_string())),
+            ty: u32_ty.clone(),
+        };
+        let expr = PreHirExpr::Cast {
+            ty: u32_ty,
+            expr: Box::new(PreHirExpr::Cast {
+                ty: u8_ty,
+                expr: Box::new(wide_sum),
+            }),
+        };
+        assert!(canonicalize_integer_expr(&expr).is_none());
     }
 }

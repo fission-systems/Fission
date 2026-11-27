@@ -10,16 +10,40 @@ pub fn strip_redundant_assign_casts(func: &mut PreHirFunction) -> bool {
     if type_map.is_empty() {
         return false;
     }
-    strip_redundant_casts_in_stmts(&mut func.body, &type_map)
+    strip_redundant_casts_in_stmts(&mut func.body, &type_map, &func.return_type)
+}
+
+fn nir_int_bits(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } => Some(*bits),
+        _ => None,
+    }
+}
+
+fn expr_int_bits(expr: &PreHirExpr, type_map: &HashMap<String, NirType>) -> Option<u32> {
+    match expr {
+        PreHirExpr::Var(name) => type_map.get(name).and_then(nir_int_bits),
+        _ => nir_int_bits(&expr_type(expr)),
+    }
+}
+
+fn lvalue_int_bits(lhs: &PreHirLValue, type_map: &HashMap<String, NirType>) -> Option<u32> {
+    match lhs {
+        PreHirLValue::Var(name) => type_map.get(name).and_then(nir_int_bits),
+        PreHirLValue::Deref { ty, .. } | PreHirLValue::FieldAccess { ty, .. } => nir_int_bits(ty),
+        PreHirLValue::Index { elem_ty, .. } => nir_int_bits(elem_ty),
+    }
 }
 
 fn strip_redundant_casts_in_stmts(
     stmts: &mut [PreHirStmt],
     type_map: &HashMap<String, NirType>,
+    return_type: &NirType,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
-        changed |= strip_redundant_casts_in_stmt(stmt, type_map);
+        changed |= strip_redundant_casts_in_stmt(stmt, type_map, return_type);
     }
     changed
 }
@@ -27,14 +51,28 @@ fn strip_redundant_casts_in_stmts(
 fn strip_redundant_casts_in_stmt(
     stmt: &mut PreHirStmt,
     type_map: &HashMap<String, NirType>,
+    return_type: &NirType,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        PreHirStmt::Assign { rhs, .. } => {
-            changed |= strip_redundant_casts_in_expr(rhs, type_map);
+        PreHirStmt::Assign { lhs, rhs } => {
+            let preserves_widening_cast = matches!(
+                (lvalue_int_bits(lhs, type_map), expr_int_bits(rhs, type_map)),
+                (Some(dst_bits), Some(src_bits)) if dst_bits > src_bits
+            );
+            changed |=
+                strip_redundant_casts_in_expr_with_context(rhs, type_map, preserves_widening_cast);
         }
-        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) => {
             changed |= strip_redundant_casts_in_expr(expr, type_map);
+        }
+        PreHirStmt::Return(Some(expr)) => {
+            let preserves_widening_cast = matches!(
+                (nir_int_bits(return_type), expr_int_bits(expr, type_map)),
+                (Some(ret_bits), Some(src_bits)) if ret_bits > src_bits
+            );
+            changed |=
+                strip_redundant_casts_in_expr_with_context(expr, type_map, preserves_widening_cast);
         }
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
@@ -42,6 +80,7 @@ fn strip_redundant_casts_in_stmt(
             changed |= strip_redundant_casts_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
+                return_type,
             );
         }
         PreHirStmt::For {
@@ -51,17 +90,18 @@ fn strip_redundant_casts_in_stmt(
             cond,
         } => {
             if let Some(i) = init {
-                changed |= strip_redundant_casts_in_stmt(i, type_map);
+                changed |= strip_redundant_casts_in_stmt(i, type_map, return_type);
             }
             if let Some(c) = cond {
                 changed |= strip_redundant_casts_in_expr(c, type_map);
             }
             if let Some(u) = update {
-                changed |= strip_redundant_casts_in_stmt(u, type_map);
+                changed |= strip_redundant_casts_in_stmt(u, type_map, return_type);
             }
             changed |= strip_redundant_casts_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
+                return_type,
             );
         }
         PreHirStmt::If {
@@ -73,10 +113,12 @@ fn strip_redundant_casts_in_stmt(
             changed |= strip_redundant_casts_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 type_map,
+                return_type,
             );
             changed |= strip_redundant_casts_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 type_map,
+                return_type,
             );
         }
         PreHirStmt::Switch {
@@ -89,11 +131,13 @@ fn strip_redundant_casts_in_stmt(
                 changed |= strip_redundant_casts_in_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     type_map,
+                    return_type,
                 );
             }
             changed |= strip_redundant_casts_in_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 type_map,
+                return_type,
             );
         }
         _ => {}
@@ -111,12 +155,16 @@ fn strip_redundant_casts_in_expr(
 fn strip_redundant_casts_in_expr_with_context(
     expr: &mut PreHirExpr,
     type_map: &HashMap<String, NirType>,
-    is_integer_compare_operand: bool,
+    preserve_integer_view: bool,
 ) -> bool {
     let mut changed = false;
     match expr {
-        PreHirExpr::Cast { expr: inner, .. } => {
-            changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, false);
+        PreHirExpr::Cast { ty, expr: inner } => {
+            let preserve_inner = matches!(
+                (nir_int_bits(ty), expr_int_bits(inner, type_map)),
+                (Some(outer_bits), Some(inner_bits)) if outer_bits > inner_bits
+            );
+            changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, preserve_inner);
         }
         PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. }
@@ -125,7 +173,7 @@ fn strip_redundant_casts_in_expr_with_context(
         | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= strip_redundant_casts_in_expr_with_context(inner, type_map, false);
         }
-        PreHirExpr::Binary { op, lhs, rhs, .. } => {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
             let preserve_operands = matches!(
                 op,
                 PreHirBinaryOp::Eq
@@ -143,8 +191,19 @@ fn strip_redundant_casts_in_expr_with_context(
                     | PreHirBinaryOp::Shr
                     | PreHirBinaryOp::Sar
             );
-            changed |= strip_redundant_casts_in_expr_with_context(lhs, type_map, preserve_operands);
-            changed |= strip_redundant_casts_in_expr_with_context(rhs, type_map, preserve_operands);
+            let bin_bits = nir_int_bits(ty);
+            let preserve_lhs = preserve_operands
+                || matches!(
+                    (bin_bits, expr_int_bits(lhs, type_map)),
+                    (Some(out_b), Some(lhs_b)) if out_b > lhs_b
+                );
+            let preserve_rhs = preserve_operands
+                || matches!(
+                    (bin_bits, expr_int_bits(rhs, type_map)),
+                    (Some(out_b), Some(rhs_b)) if out_b > rhs_b
+                );
+            changed |= strip_redundant_casts_in_expr_with_context(lhs, type_map, preserve_lhs);
+            changed |= strip_redundant_casts_in_expr_with_context(rhs, type_map, preserve_rhs);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
@@ -173,12 +232,12 @@ fn strip_redundant_casts_in_expr_with_context(
     if let PreHirExpr::Cast { ty, expr: inner } = expr {
         if let PreHirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
-                // Comparison and division/shift views survive intermediate
-                // binding types. Later signedness or width refinement must
-                // not change unsigned storage extraction into signed division.
-                let is_integer_compare_boundary =
-                    is_integer_compare_operand && matches!(ty, NirType::Int { .. });
-                if var_ty == ty && !is_integer_compare_boundary {
+                // Comparison, division/shift, and widening-boundary views
+                // must survive intermediate binding types so later signed
+                // promotion (e.g. `u8 -> i8`) never silently changes
+                // zero-extension into negative sign extension.
+                let is_preserved_view = preserve_integer_view && matches!(ty, NirType::Int { .. });
+                if var_ty == ty && !is_preserved_view {
                     *expr = (**inner).clone();
                     changed = true;
                 }
@@ -1220,13 +1279,23 @@ fn try_strip_outer_cast_for_target(
         // `(uint)x` into a `long`: the store extends the cast's result, not `x`.
         return None;
     }
-    let preserved = match resolved_expr_type(inner, binding_types) {
-        NirType::Bool => true,
-        NirType::Int { bits, .. } => bits == target_bits,
-        NirType::Unknown | NirType::Float { .. } | NirType::Ptr(_) | NirType::Aggregate { .. } => {
-            false
-        }
-    };
+    let explicit_narrow_inner_cast = cast_bits == target_bits
+        && matches!(
+            inner.as_ref(),
+            PreHirExpr::Cast {
+                ty: NirType::Int { bits, .. },
+                ..
+            } if *bits < target_bits
+        );
+    let preserved = explicit_narrow_inner_cast
+        || match resolved_expr_type(inner, binding_types) {
+            NirType::Bool => true,
+            NirType::Int { bits, .. } => bits == target_bits,
+            NirType::Unknown
+            | NirType::Float { .. }
+            | NirType::Ptr(_)
+            | NirType::Aggregate { .. } => false,
+        };
     preserved.then(|| (**inner).clone())
 }
 
@@ -1625,5 +1694,92 @@ mod comparison_view_tests {
         };
         assert!(try_strip_outer_cast(&sign_widen, &i32_ty, &types).is_none());
         assert!(try_strip_return_outer_cast(&sign_widen, &i32_ty, &types).is_none());
+    }
+
+    #[test]
+    fn redundant_cast_cleanup_preserves_unsigned_widening_cast_before_signed_promotion() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let type_map = HashMap::from_iter([
+            ("r9b".to_string(), u8_ty.clone()),
+            ("b0_32".to_string(), u32_ty.clone()),
+            ("b1_32".to_string(), u32_ty.clone()),
+        ]);
+
+        // Widening Cast(u32, Cast(u8, r9b))
+        let mut widened_cast = PreHirExpr::Cast {
+            ty: u32_ty.clone(),
+            expr: Box::new(PreHirExpr::Cast {
+                ty: u8_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("r9b".to_string())),
+            }),
+        };
+        let orig_widened = widened_cast.clone();
+        assert!(!strip_redundant_casts_in_expr(&mut widened_cast, &type_map));
+        assert_eq!(widened_cast, orig_widened);
+
+        // Widening Binary Add(b0_32, Cast(u8, r9b), u32)
+        let mut widened_bin = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("b0_32".to_string())),
+            rhs: Box::new(PreHirExpr::Cast {
+                ty: u8_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("r9b".to_string())),
+            }),
+            ty: u32_ty.clone(),
+        };
+        let orig_bin = widened_bin.clone();
+        assert!(!strip_redundant_casts_in_expr(&mut widened_bin, &type_map));
+        assert_eq!(widened_bin, orig_bin);
+
+        // Widening Assign(b1_32: u32, Cast(u8, r9b))
+        let mut func = PreHirFunction {
+            locals: vec![
+                PreHirBinding {
+                    name: "r9b".to_string(),
+                    ty: u8_ty.clone(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "b1_32".to_string(),
+                    ty: u32_ty.clone(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("b1_32".to_string()),
+                rhs: PreHirExpr::Cast {
+                    ty: u8_ty.clone(),
+                    expr: Box::new(PreHirExpr::Var("r9b".to_string())),
+                },
+            }],
+            ..Default::default()
+        };
+        assert!(!strip_redundant_assign_casts(&mut func));
+
+        // Same-width outer `(u32)` on an explicit `(u8)x` cast strips cleanly when
+        // returned as `u32`, while wider `(u64)(i8)` on `i32` return stays intact.
+        let inner_u8 = PreHirExpr::Cast {
+            ty: u8_ty,
+            expr: Box::new(PreHirExpr::Const(300, u32_ty.clone())),
+        };
+        let outer_u32_of_u8 = PreHirExpr::Cast {
+            ty: u32_ty.clone(),
+            expr: Box::new(inner_u8.clone()),
+        };
+        assert_eq!(
+            try_strip_return_outer_cast(&outer_u32_of_u8, &u32_ty, &type_map),
+            Some(inner_u8)
+        );
     }
 }

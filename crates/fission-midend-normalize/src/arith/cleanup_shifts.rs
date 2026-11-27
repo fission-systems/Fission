@@ -33,6 +33,36 @@ pub fn collapse_zero_offset_cast(expr: &PreHirExpr) -> Option<PreHirExpr> {
     }
 }
 
+fn simplify_redundant_full_mask_and(
+    operand: &PreHirExpr,
+    mask: &PreHirExpr,
+    out_ty: &NirType,
+) -> Option<PreHirExpr> {
+    let operand_ty = expr_type(operand);
+    // Only unsigned full masks are no-ops; `& 0xff` on a signed `char`
+    // clears bits 8..N when widened, so dropping the mask would expose
+    // negative sign extension.
+    if !matches!(
+        operand_ty,
+        NirType::Bool | NirType::Int { signed: false, .. }
+    ) {
+        return None;
+    }
+    if !is_full_mask_const(mask, &operand_ty) {
+        return None;
+    }
+    if let (Some(out_bits), Some(operand_bits)) =
+        (int_type_bits(out_ty), int_type_bits(&operand_ty))
+        && out_bits > operand_bits
+    {
+        return Some(PreHirExpr::Cast {
+            ty: out_ty.clone(),
+            expr: Box::new(operand.clone()),
+        });
+    }
+    Some(operand.clone())
+}
+
 pub fn cleanup_arithmetic_wrappers(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
         PreHirExpr::Binary {
@@ -149,14 +179,16 @@ pub fn cleanup_arithmetic_wrappers(expr: &PreHirExpr) -> Option<PreHirExpr> {
             op: PreHirBinaryOp::And,
             lhs,
             rhs,
-            ..
-        } if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) => Some((**lhs).clone()),
-        PreHirExpr::Binary {
-            op: PreHirBinaryOp::And,
-            lhs,
-            rhs,
-            ..
-        } if is_full_mask_const(lhs.as_ref(), &expr_type(rhs)) => Some((**rhs).clone()),
+            ty,
+        } => {
+            if let Some(simplified) = simplify_redundant_full_mask_and(lhs, rhs, ty) {
+                return Some(simplified);
+            }
+            if let Some(simplified) = simplify_redundant_full_mask_and(rhs, lhs, ty) {
+                return Some(simplified);
+            }
+            None
+        }
         // Sar(Cast(signed_T, x), k) → the cast already makes the value signed;
         // if the output type of the Sar equals the cast type, the cast is
         // redundant — drop it.  This prevents the printer from emitting a
@@ -537,5 +569,56 @@ mod tests {
             ty: u64_ty(),
         };
         assert!(merge_consecutive_shifts(&merged_call).is_none());
+    }
+
+    #[test]
+    fn full_mask_and_preserves_signed_mask_and_widened_unsigned_result_type() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let i8_ty = NirType::Int {
+            bits: 8,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        // `(u32)((char)x & 0xff)` must NOT drop `& 0xff`, because dropping it turns
+        // zero-extension into sign-extension when `(char)x` widens.
+        let signed_and_mask = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: i8_ty,
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0xff, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        assert!(cleanup_arithmetic_wrappers(&signed_and_mask).is_none());
+
+        // `(u32)((uchar)r9b & 0xff)` simplifies the redundant mask while preserving the
+        // widening `u32` result type around `(uchar)r9b`.
+        let unsigned_and_mask = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: u8_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("r9b".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0xff, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        assert_eq!(
+            cleanup_arithmetic_wrappers(&unsigned_and_mask),
+            Some(PreHirExpr::Cast {
+                ty: u32_ty,
+                expr: Box::new(PreHirExpr::Cast {
+                    ty: u8_ty,
+                    expr: Box::new(PreHirExpr::Var("r9b".to_string())),
+                }),
+            })
+        );
     }
 }
