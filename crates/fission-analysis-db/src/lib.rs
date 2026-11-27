@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::sync::Arc;
 
 mod integrity;
 mod quarantine;
@@ -80,6 +81,418 @@ pub struct Provenance {
     pub confidence: FactConfidence,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "status", content = "value", rename_all = "snake_case")]
+pub enum IdentityField<T> {
+    Available(T),
+    Unavailable,
+}
+
+impl<T> IdentityField<T> {
+    pub fn as_option(&self) -> Option<&T> {
+        match self {
+            Self::Available(value) => Some(value),
+            Self::Unavailable => None,
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        matches!(self, Self::Available(_))
+    }
+}
+
+fn non_empty_identity(value: &str) -> IdentityField<String> {
+    if value.trim().is_empty() {
+        IdentityField::Unavailable
+    } else {
+        IdentityField::Available(value.to_string())
+    }
+}
+
+fn opt_non_empty_identity(value: Option<&str>) -> IdentityField<String> {
+    value
+        .and_then(|s| (!s.trim().is_empty()).then(|| s.to_string()))
+        .map_or(IdentityField::Unavailable, IdentityField::Available)
+}
+
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+fn fnv_write_bytes(hash: &mut u64, bytes: &[u8]) {
+    for &byte in bytes {
+        *hash ^= u64::from(byte);
+        *hash = hash.wrapping_mul(FNV_PRIME);
+    }
+}
+
+fn fnv_write_u64(hash: &mut u64, value: u64) {
+    fnv_write_bytes(hash, &value.to_le_bytes());
+}
+
+fn fnv_write_str(hash: &mut u64, value: &str) {
+    fnv_write_u64(hash, value.len() as u64);
+    fnv_write_bytes(hash, value.as_bytes());
+}
+
+fn fnv_write_opt_str(hash: &mut u64, value: Option<&str>) {
+    match value {
+        Some(text) => {
+            fnv_write_bytes(hash, &[1]);
+            fnv_write_str(hash, text);
+        }
+        None => fnv_write_bytes(hash, &[0]),
+    }
+}
+
+fn load_mapping_digest_for_blocks(blocks: &[MemoryBlock]) -> u64 {
+    let mut hash = FNV_OFFSET_BASIS;
+    fnv_write_u64(&mut hash, blocks.len() as u64);
+    for block in blocks {
+        fnv_write_u64(&mut hash, block.start);
+        fnv_write_u64(&mut hash, block.size);
+        fnv_write_u64(&mut hash, block.virtual_size);
+        fnv_write_u64(&mut hash, block.file_offset);
+        fnv_write_u64(&mut hash, block.file_size);
+        let perm_bits = u8::from(block.permissions.read)
+            | (u8::from(block.permissions.write) << 1)
+            | (u8::from(block.permissions.execute) << 2);
+        fnv_write_bytes(&mut hash, &[perm_bits]);
+    }
+    hash
+}
+
+fn project_decision_state_from_binary(binary: &LoadedBinary) -> (u64, bool) {
+    let mut hash = FNV_OFFSET_BASIS;
+    let mut has_decisions = !binary.user_signatures.is_empty()
+        || !binary.user_comments.is_empty()
+        || !binary.user_breakpoints.is_empty()
+        || !binary.user_watchpoints.is_empty();
+
+    let mut sig_addrs: Vec<u64> = binary.user_signatures.keys().copied().collect();
+    sig_addrs.sort_unstable();
+    fnv_write_u64(&mut hash, sig_addrs.len() as u64);
+    for addr in sig_addrs {
+        let sig = &binary.user_signatures[&addr];
+        fnv_write_u64(&mut hash, addr);
+        fnv_write_opt_str(&mut hash, sig.return_type.as_deref());
+        fnv_write_u64(&mut hash, sig.param_types.len() as u64);
+        for ty in &sig.param_types {
+            fnv_write_str(&mut hash, ty);
+        }
+        fnv_write_u64(&mut hash, sig.param_names.len() as u64);
+        for name in &sig.param_names {
+            fnv_write_str(&mut hash, name);
+        }
+    }
+
+    let mut comment_addrs: Vec<u64> = binary.user_comments.keys().copied().collect();
+    comment_addrs.sort_unstable();
+    fnv_write_u64(&mut hash, comment_addrs.len() as u64);
+    for addr in comment_addrs {
+        fnv_write_u64(&mut hash, addr);
+        fnv_write_str(&mut hash, &binary.user_comments[&addr]);
+    }
+
+    let mut breakpoints = binary.user_breakpoints.clone();
+    breakpoints.sort_unstable();
+    fnv_write_u64(&mut hash, breakpoints.len() as u64);
+    for bp in breakpoints {
+        fnv_write_u64(&mut hash, bp);
+    }
+
+    let mut watchpoints = binary.user_watchpoints.clone();
+    watchpoints.sort_by_key(|wp| (wp.address, wp.size, wp.on_read, wp.on_write));
+    fnv_write_u64(&mut hash, watchpoints.len() as u64);
+    for wp in watchpoints {
+        fnv_write_u64(&mut hash, wp.address);
+        fnv_write_u64(&mut hash, wp.size);
+        fnv_write_bytes(&mut hash, &[u8::from(wp.on_read), u8::from(wp.on_write)]);
+    }
+
+    let sidecar_path = std::path::Path::new(&binary.path).with_extension("fission.json");
+    match std::fs::read(&sidecar_path) {
+        Ok(bytes) => {
+            has_decisions = true;
+            fnv_write_bytes(&mut hash, &[1]);
+            fnv_write_u64(&mut hash, bytes.len() as u64);
+            fnv_write_bytes(&mut hash, &bytes);
+        }
+        Err(_) => {
+            fnv_write_bytes(&mut hash, &[0]);
+        }
+    }
+
+    (hash, has_decisions)
+}
+
+fn snapshot_analysis_revision(
+    schema: &str,
+    binary: &BinaryMetadata,
+    memory_blocks: &[MemoryBlock],
+    functions: &[FunctionRecord],
+    symbols: &[SymbolRecord],
+    relocations: &[RelocationRecord],
+) -> u64 {
+    let mut hash = FNV_OFFSET_BASIS;
+    fnv_write_str(&mut hash, schema);
+    fnv_write_str(&mut hash, &binary.content_hash);
+    fnv_write_str(&mut hash, &binary.format);
+    fnv_write_bytes(&mut hash, &[binary.bitness]);
+    fnv_write_u64(&mut hash, binary.image_base);
+    fnv_write_u64(&mut hash, binary.entry_point);
+    fnv_write_opt_str(&mut hash, binary.processor.as_deref());
+    fnv_write_opt_str(&mut hash, binary.endian.as_deref());
+    fnv_write_opt_str(&mut hash, binary.abi.as_deref());
+    fnv_write_opt_str(&mut hash, binary.language_id.as_deref());
+    fnv_write_opt_str(&mut hash, binary.compiler_spec_id.as_deref());
+    fnv_write_u64(&mut hash, load_mapping_digest_for_blocks(memory_blocks));
+    fnv_write_u64(&mut hash, functions.len() as u64);
+    for func in functions {
+        fnv_write_u64(&mut hash, func.entry);
+        fnv_write_u64(&mut hash, func.size);
+        fnv_write_str(&mut hash, &func.name);
+        fnv_write_u64(
+            &mut hash,
+            u64::from(func.is_import) | (u64::from(func.is_export) << 1),
+        );
+    }
+    fnv_write_u64(&mut hash, symbols.len() as u64);
+    for sym in symbols {
+        fnv_write_u64(&mut hash, sym.address);
+        fnv_write_str(&mut hash, &sym.name);
+    }
+    fnv_write_u64(&mut hash, relocations.len() as u64);
+    for reloc in relocations {
+        fnv_write_u64(&mut hash, reloc.address);
+        fnv_write_opt_str(&mut hash, reloc.symbol_name.as_deref());
+    }
+    hash
+}
+
+/// Explicit identity contract binding binary content, effective load mapping
+/// and spec, analysis revision, and project decision revision, distinguishing
+/// available fields from unavailable ones without comparing host paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgramViewIdentity {
+    pub content_hash: IdentityField<String>,
+    pub format: IdentityField<String>,
+    pub bitness: IdentityField<u8>,
+    pub image_base: u64,
+    pub entry_point: u64,
+    pub load_mapping_digest: IdentityField<u64>,
+    pub processor: IdentityField<String>,
+    pub endian: IdentityField<String>,
+    pub abi: IdentityField<String>,
+    pub language_id: IdentityField<String>,
+    pub compiler_spec_id: IdentityField<String>,
+    pub analysis_revision: IdentityField<u64>,
+    pub project_decision_revision: IdentityField<u64>,
+    pub has_project_decisions: bool,
+}
+
+impl ProgramViewIdentity {
+    pub fn empty() -> Self {
+        Self {
+            content_hash: IdentityField::Unavailable,
+            format: IdentityField::Unavailable,
+            bitness: IdentityField::Unavailable,
+            image_base: 0,
+            entry_point: 0,
+            load_mapping_digest: IdentityField::Unavailable,
+            processor: IdentityField::Unavailable,
+            endian: IdentityField::Unavailable,
+            abi: IdentityField::Unavailable,
+            language_id: IdentityField::Unavailable,
+            compiler_spec_id: IdentityField::Unavailable,
+            analysis_revision: IdentityField::Unavailable,
+            project_decision_revision: IdentityField::Unavailable,
+            has_project_decisions: false,
+        }
+    }
+
+    pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
+        let blocks = build_memory_blocks(binary);
+        let load_mapping_digest = load_mapping_digest_for_blocks(&blocks);
+        let (decision_rev, has_decisions) = project_decision_state_from_binary(binary);
+        let architecture = binary.architecture.as_ref();
+        let load_spec = binary.load_spec.as_ref();
+        Self {
+            content_hash: non_empty_identity(&binary.hash),
+            format: non_empty_identity(&binary.format),
+            bitness: IdentityField::Available(if binary.is_64bit { 64 } else { 32 }),
+            image_base: binary.image_base,
+            entry_point: binary.entry_point,
+            load_mapping_digest: IdentityField::Available(load_mapping_digest),
+            processor: opt_non_empty_identity(architecture.map(|a| a.processor.as_str())),
+            endian: opt_non_empty_identity(architecture.map(|a| a.endian.as_str())),
+            abi: opt_non_empty_identity(architecture.and_then(|a| a.abi.as_deref())),
+            language_id: opt_non_empty_identity(load_spec.map(|ls| ls.pair.language_id.as_str())),
+            compiler_spec_id: opt_non_empty_identity(
+                load_spec.map(|ls| ls.pair.compiler_spec_id.as_str()),
+            ),
+            analysis_revision: IdentityField::Unavailable,
+            project_decision_revision: IdentityField::Available(decision_rev),
+            has_project_decisions: has_decisions,
+        }
+    }
+
+    fn from_snapshot_parts(
+        schema: &str,
+        binary: &BinaryMetadata,
+        memory_blocks: &[MemoryBlock],
+        functions: &[FunctionRecord],
+        symbols: &[SymbolRecord],
+        relocations: &[RelocationRecord],
+        project_decision_revision: IdentityField<u64>,
+        has_project_decisions: bool,
+    ) -> Self {
+        Self {
+            content_hash: non_empty_identity(&binary.content_hash),
+            format: non_empty_identity(&binary.format),
+            bitness: if binary.bitness == 0 {
+                IdentityField::Unavailable
+            } else {
+                IdentityField::Available(binary.bitness)
+            },
+            image_base: binary.image_base,
+            entry_point: binary.entry_point,
+            load_mapping_digest: IdentityField::Available(load_mapping_digest_for_blocks(
+                memory_blocks,
+            )),
+            processor: opt_non_empty_identity(binary.processor.as_deref()),
+            endian: opt_non_empty_identity(binary.endian.as_deref()),
+            abi: opt_non_empty_identity(binary.abi.as_deref()),
+            language_id: opt_non_empty_identity(binary.language_id.as_deref()),
+            compiler_spec_id: opt_non_empty_identity(binary.compiler_spec_id.as_deref()),
+            analysis_revision: IdentityField::Available(snapshot_analysis_revision(
+                schema,
+                binary,
+                memory_blocks,
+                functions,
+                symbols,
+                relocations,
+            )),
+            project_decision_revision,
+            has_project_decisions,
+        }
+    }
+}
+
+/// One typed mismatch between a [`LoadedBinary`] and a [`ProgramSnapshot`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramJoinMismatch {
+    MissingRequiredIdentity {
+        side: &'static str,
+        field: &'static str,
+    },
+    ContentHashMismatch {
+        binary: String,
+        snapshot: String,
+    },
+    FormatMismatch {
+        binary: String,
+        snapshot: String,
+    },
+    BitnessMismatch {
+        binary: u8,
+        snapshot: u8,
+    },
+    ImageBaseMismatch {
+        binary: u64,
+        snapshot: u64,
+    },
+    EntryPointMismatch {
+        binary: u64,
+        snapshot: u64,
+    },
+    LoadMappingMismatch {
+        binary: IdentityField<u64>,
+        snapshot: IdentityField<u64>,
+    },
+    LoadSpecMismatch {
+        field: &'static str,
+        binary: IdentityField<String>,
+        snapshot: IdentityField<String>,
+    },
+    ProjectDecisionRevisionMismatch {
+        binary: IdentityField<u64>,
+        snapshot: IdentityField<u64>,
+    },
+}
+
+/// Failure when validating or joining a [`LoadedBinary`] with a [`ProgramSnapshot`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramJoinError {
+    InvalidSnapshot(SnapshotIntegrityReport),
+    IdentityMismatch(Vec<ProgramJoinMismatch>),
+}
+
+impl fmt::Display for ProgramJoinError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSnapshot(report) => {
+                write!(f, "program join rejected invalid snapshot: {report}")
+            }
+            Self::IdentityMismatch(mismatches) => write!(
+                f,
+                "program join rejected mismatched binary/snapshot identity ({} mismatch(es)): {:?}",
+                mismatches.len(),
+                mismatches
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProgramJoinError {}
+
+/// Checked pairing of an immutable [`LoadedBinary`] with a validated canonical
+/// [`ProgramSnapshot`] whose program identity, load mapping, spec, and project
+/// decisions match. Validation runs once at construction so downstream reuse
+/// via shared `Arc`s stays cheap.
+#[derive(Debug, Clone)]
+pub struct CheckedProgramView<'bin> {
+    binary: &'bin LoadedBinary,
+    program: Arc<ProgramSnapshot>,
+}
+
+impl<'bin> CheckedProgramView<'bin> {
+    pub fn new(
+        binary: &'bin LoadedBinary,
+        program: Arc<ProgramSnapshot>,
+    ) -> Result<Self, ProgramJoinError> {
+        program.validate_for_loaded_binary(binary)?;
+        Ok(Self { binary, program })
+    }
+
+    pub fn from_publication(
+        binary: &'bin LoadedBinary,
+        publication: SnapshotPublication,
+    ) -> Result<Self, ProgramJoinError> {
+        match publication {
+            SnapshotPublication::Valid(snapshot) => Self::new(binary, Arc::new(snapshot)),
+            SnapshotPublication::Partial(partial) => Err(ProgramJoinError::InvalidSnapshot(
+                partial.integrity_report().clone(),
+            )),
+        }
+    }
+
+    pub fn binary(&self) -> &'bin LoadedBinary {
+        self.binary
+    }
+
+    pub fn program(&self) -> &ProgramSnapshot {
+        &self.program
+    }
+
+    pub fn program_arc(&self) -> Arc<ProgramSnapshot> {
+        Arc::clone(&self.program)
+    }
+
+    pub fn identity(&self) -> &ProgramViewIdentity {
+        self.program.identity()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,7 +688,7 @@ impl AddressIntervalIndex {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProgramSnapshot {
     schema: String,
     binary: BinaryMetadata,
@@ -287,7 +700,24 @@ pub struct ProgramSnapshot {
     function_intervals: AddressIntervalIndex,
     #[serde(skip)]
     memory_block_intervals: AddressIntervalIndex,
+    #[serde(skip)]
+    program_identity: Arc<ProgramViewIdentity>,
 }
+
+impl PartialEq for ProgramSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.schema == other.schema
+            && self.binary == other.binary
+            && self.memory_blocks == other.memory_blocks
+            && self.functions == other.functions
+            && self.symbols == other.symbols
+            && self.relocations == other.relocations
+            && self.function_intervals == other.function_intervals
+            && self.memory_block_intervals == other.memory_block_intervals
+    }
+}
+
+impl Eq for ProgramSnapshot {}
 
 #[derive(Deserialize)]
 struct RawProgramSnapshot {
@@ -621,6 +1051,8 @@ pub struct ProgramSnapshotBuilder {
     symbols: Vec<SymbolRecord>,
     relocations: Vec<RelocationRecord>,
     staging_ids: StagingIds,
+    project_decision_revision: IdentityField<u64>,
+    has_project_decisions: bool,
 }
 
 /// Index of the single staged row carrying `id`.
@@ -752,6 +1184,8 @@ impl ProgramSnapshotBuilder {
             symbols,
             relocations,
             staging_ids,
+            project_decision_revision: IdentityField::Unavailable,
+            has_project_decisions: false,
         }
     }
 
@@ -763,8 +1197,9 @@ impl ProgramSnapshotBuilder {
         let relocations = build_relocations(binary, &symbols);
         let architecture = binary.architecture.as_ref();
         let load_spec = binary.load_spec.as_ref();
+        let (decision_rev, has_decisions) = project_decision_state_from_binary(binary);
 
-        Self::from_raw_parts(
+        let mut builder = Self::from_raw_parts(
             PROGRAM_SNAPSHOT_SCHEMA.to_string(),
             BinaryMetadata {
                 content_hash: binary.hash.clone(),
@@ -783,7 +1218,10 @@ impl ProgramSnapshotBuilder {
             functions,
             symbols,
             relocations,
-        )
+        );
+        builder.project_decision_revision = IdentityField::Available(decision_rev);
+        builder.has_project_decisions = has_decisions;
+        builder
     }
 
     pub fn with_schema(mut self, schema: impl Into<String>) -> Self {
@@ -1072,6 +1510,16 @@ impl ProgramSnapshotBuilder {
     fn seal(self) -> ProgramSnapshot {
         let memory_block_intervals = build_memory_block_intervals(&self.memory_blocks);
         let function_intervals = build_function_intervals(&self.functions);
+        let program_identity = ProgramViewIdentity::from_snapshot_parts(
+            &self.schema,
+            &self.binary,
+            &self.memory_blocks,
+            &self.functions,
+            &self.symbols,
+            &self.relocations,
+            self.project_decision_revision,
+            self.has_project_decisions,
+        );
         ProgramSnapshot {
             schema: self.schema,
             binary: self.binary,
@@ -1081,6 +1529,7 @@ impl ProgramSnapshotBuilder {
             relocations: self.relocations,
             function_intervals,
             memory_block_intervals,
+            program_identity: Arc::new(program_identity),
         }
     }
 
@@ -1123,6 +1572,7 @@ impl ProgramSnapshot {
             relocations: Vec::new(),
             function_intervals: AddressIntervalIndex::default(),
             memory_block_intervals: AddressIntervalIndex::default(),
+            program_identity: Arc::new(ProgramViewIdentity::empty()),
         }
     }
 
@@ -1131,14 +1581,202 @@ impl ProgramSnapshot {
     }
 
     pub fn to_builder(&self) -> ProgramSnapshotBuilder {
-        ProgramSnapshotBuilder::from_raw_parts(
+        let mut builder = ProgramSnapshotBuilder::from_raw_parts(
             self.schema.clone(),
             self.binary.clone(),
             self.memory_blocks.clone(),
             self.functions.clone(),
             self.symbols.clone(),
             self.relocations.clone(),
-        )
+        );
+        builder.project_decision_revision = self.program_identity.project_decision_revision;
+        builder.has_project_decisions = self.program_identity.has_project_decisions;
+        builder
+    }
+
+    /// Structured identity binding binary content, load mapping, spec,
+    /// analysis revision, and project decision revision.
+    pub fn identity(&self) -> &ProgramViewIdentity {
+        &self.program_identity
+    }
+
+    /// Validate that this snapshot is canonically sound and matches the
+    /// identity, load mapping, spec, and project decisions of `binary`.
+    pub fn validate_for_loaded_binary(
+        &self,
+        binary: &LoadedBinary,
+    ) -> Result<(), ProgramJoinError> {
+        let integrity = self.integrity_report();
+        if !integrity.is_valid() {
+            return Err(ProgramJoinError::InvalidSnapshot(integrity));
+        }
+
+        let bin_id = ProgramViewIdentity::from_loaded_binary(binary);
+        let snap_id = &self.program_identity;
+        let mut mismatches = Vec::new();
+
+        match (&bin_id.content_hash, &snap_id.content_hash) {
+            (IdentityField::Available(b), IdentityField::Available(s)) if b == s => {}
+            (IdentityField::Available(b), IdentityField::Available(s)) => {
+                mismatches.push(ProgramJoinMismatch::ContentHashMismatch {
+                    binary: b.clone(),
+                    snapshot: s.clone(),
+                });
+            }
+            (IdentityField::Unavailable, IdentityField::Unavailable) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "binary",
+                    field: "content_hash",
+                });
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "snapshot",
+                    field: "content_hash",
+                });
+            }
+            (IdentityField::Unavailable, _) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "binary",
+                    field: "content_hash",
+                });
+            }
+            (_, IdentityField::Unavailable) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "snapshot",
+                    field: "content_hash",
+                });
+            }
+        }
+
+        match (&bin_id.format, &snap_id.format) {
+            (IdentityField::Available(b), IdentityField::Available(s)) if b == s => {}
+            (IdentityField::Available(b), IdentityField::Available(s)) => {
+                mismatches.push(ProgramJoinMismatch::FormatMismatch {
+                    binary: b.clone(),
+                    snapshot: s.clone(),
+                });
+            }
+            (IdentityField::Unavailable, IdentityField::Unavailable) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "binary",
+                    field: "format",
+                });
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "snapshot",
+                    field: "format",
+                });
+            }
+            (IdentityField::Unavailable, _) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "binary",
+                    field: "format",
+                });
+            }
+            (_, IdentityField::Unavailable) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "snapshot",
+                    field: "format",
+                });
+            }
+        }
+
+        match (bin_id.bitness, snap_id.bitness) {
+            (IdentityField::Available(b), IdentityField::Available(s)) if b == s => {}
+            (IdentityField::Available(b), IdentityField::Available(s)) => {
+                mismatches.push(ProgramJoinMismatch::BitnessMismatch {
+                    binary: b,
+                    snapshot: s,
+                });
+            }
+            (IdentityField::Unavailable, IdentityField::Unavailable) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "binary",
+                    field: "bitness",
+                });
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "snapshot",
+                    field: "bitness",
+                });
+            }
+            (IdentityField::Unavailable, _) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "binary",
+                    field: "bitness",
+                });
+            }
+            (_, IdentityField::Unavailable) => {
+                mismatches.push(ProgramJoinMismatch::MissingRequiredIdentity {
+                    side: "snapshot",
+                    field: "bitness",
+                });
+            }
+        }
+
+        if bin_id.image_base != snap_id.image_base {
+            mismatches.push(ProgramJoinMismatch::ImageBaseMismatch {
+                binary: bin_id.image_base,
+                snapshot: snap_id.image_base,
+            });
+        }
+        if bin_id.entry_point != snap_id.entry_point {
+            mismatches.push(ProgramJoinMismatch::EntryPointMismatch {
+                binary: bin_id.entry_point,
+                snapshot: snap_id.entry_point,
+            });
+        }
+        if bin_id.load_mapping_digest != snap_id.load_mapping_digest {
+            mismatches.push(ProgramJoinMismatch::LoadMappingMismatch {
+                binary: bin_id.load_mapping_digest,
+                snapshot: snap_id.load_mapping_digest,
+            });
+        }
+
+        for (field, bin_val, snap_val) in [
+            ("processor", &bin_id.processor, &snap_id.processor),
+            ("endian", &bin_id.endian, &snap_id.endian),
+            ("abi", &bin_id.abi, &snap_id.abi),
+            ("language_id", &bin_id.language_id, &snap_id.language_id),
+            (
+                "compiler_spec_id",
+                &bin_id.compiler_spec_id,
+                &snap_id.compiler_spec_id,
+            ),
+        ] {
+            if bin_val != snap_val {
+                mismatches.push(ProgramJoinMismatch::LoadSpecMismatch {
+                    field,
+                    binary: bin_val.clone(),
+                    snapshot: snap_val.clone(),
+                });
+            }
+        }
+
+        let decision_mismatch = match (
+            bin_id.project_decision_revision,
+            snap_id.project_decision_revision,
+        ) {
+            (IdentityField::Available(b), IdentityField::Available(s)) => b != s,
+            (IdentityField::Available(_), IdentityField::Unavailable) => {
+                bin_id.has_project_decisions
+            }
+            (IdentityField::Unavailable, IdentityField::Available(_)) => {
+                snap_id.has_project_decisions
+            }
+            (IdentityField::Unavailable, IdentityField::Unavailable) => {
+                bin_id.has_project_decisions != snap_id.has_project_decisions
+            }
+        };
+        if decision_mismatch || bin_id.has_project_decisions != snap_id.has_project_decisions {
+            mismatches.push(ProgramJoinMismatch::ProjectDecisionRevisionMismatch {
+                binary: bin_id.project_decision_revision,
+                snapshot: snap_id.project_decision_revision,
+            });
+        }
+
+        if mismatches.is_empty() {
+            Ok(())
+        } else {
+            Err(ProgramJoinError::IdentityMismatch(mismatches))
+        }
     }
 
     pub fn schema(&self) -> &str {
