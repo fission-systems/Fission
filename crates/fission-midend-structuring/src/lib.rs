@@ -52,6 +52,7 @@ pub mod reaching_conditions;
 pub mod reaching_driver;
 pub mod reaching_emit;
 pub mod regions;
+pub mod sailr_driver;
 pub mod sese_discovery;
 pub mod sese_driver;
 pub mod structuring_quality;

@@ -429,6 +429,7 @@ fn try_alternative_structurings(
         DreamHierarchical,
         DreamHierarchicalVirtualGotos,
         RegionIdentifier,
+        Sailr,
     }
 
     let mut best_quality = baseline_quality;
@@ -479,8 +480,12 @@ fn try_alternative_structurings(
         // every regression and 88 of the gains with it.
         let quality = measure(&candidate.body);
         let candidate_normalized = normalized(&candidate.body);
-        let post_layout_pair =
-            require_post_layout.then(|| (post_layout(best_body), post_layout(&candidate.body)));
+        let improves = quality.improves_on_axis(best_quality, axis)
+            && candidate_normalized.gotos <= best_normalized.gotos;
+        // Laying both bodies out runs normalize on each, so it is done only
+        // when its answer can still decide the admission.
+        let post_layout_pair = (require_post_layout && improves)
+            .then(|| (post_layout(best_body), post_layout(&candidate.body)));
         let max_guard_required =
             candidate.hierarchical || matches!(admission, AlternativeAdmission::LinearFallback);
         let max_guard_admitted = !max_guard_required
@@ -492,8 +497,7 @@ fn try_alternative_structurings(
         // still goes through the same isolated commit rerun below.
         let forced = forced_driver().is_some_and(|want| want.eq_ignore_ascii_case(name));
         if forced
-            || (quality.improves_on_axis(best_quality, axis)
-                && candidate_normalized.gotos <= best_normalized.gotos
+            || (improves
                 && post_layout_pair
                     .as_ref()
                     .is_none_or(|(best, candidate)| candidate.gotos <= best.gotos)
@@ -684,6 +688,32 @@ fn try_alternative_structurings(
         }
     }
 
+    // SAILR runs last, so it is taken only where it strictly beats every
+    // candidate above -- including the existing path. Like RegionIdentifier
+    // it must also not add jumps once both bodies are laid out: measured on
+    // eight real binaries, 38 of the 244 functions it changed shipped with
+    // more gotos than the existing path (up to 7 -> 13) because the cleanup
+    // after structuring removed more of the baseline's jumps than of its own.
+    if fission_midend_structuring::sailr_driver::sailr_driver_enabled() {
+        let c =
+            fission_midend_structuring::sailr_driver::preview_sailr(ir.builder).map(|candidate| {
+                candidate.map(|body| OfferedCandidate {
+                    body,
+                    hierarchical: false,
+                })
+            });
+        consider(
+            AlternativeDriver::Sailr,
+            "SAILR",
+            c,
+            &mut best_quality,
+            &mut best_normalized,
+            &mut best_body,
+            true,
+            &mut winner,
+        );
+    }
+
     let (name, committed) = match winner {
         Some(AlternativeDriver::MatchFold) => (
             "match-fold",
@@ -723,6 +753,10 @@ fn try_alternative_structurings(
                 ir.builder,
             )
             .map(|candidate| candidate.map(|candidate| candidate.body)),
+        ),
+        Some(AlternativeDriver::Sailr) => (
+            "SAILR",
+            fission_midend_structuring::sailr_driver::structure_by_sailr(ir.builder),
         ),
         None => return baseline,
     };

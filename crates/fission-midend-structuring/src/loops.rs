@@ -2433,7 +2433,7 @@ fn stmts_contain_break(stmts: &[PreHirStmt]) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use fission_midend_core::ir::NirType;
     use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt};
@@ -2752,7 +2752,9 @@ mod tests {
         assert!(terminal_do_while_condition(&partial).is_none());
     }
 
-    struct MockRotatedLoopHost {
+    /// A [`StructuringHost`] over fixed per-block statements and terminators.
+    /// Shared with other drivers' tests (`sailr_driver`).
+    pub(crate) struct MockRotatedLoopHost {
         options: fission_midend_core::ir::MlilPreviewOptions,
         work_counter: std::rc::Rc<std::cell::Cell<u64>>,
         resource_usage: std::rc::Rc<fission_midend_core::ir::ResourceUsage>,
@@ -2771,10 +2773,14 @@ mod tests {
         block_addrs: Vec<u64>,
         stmts: Vec<Vec<PreHirStmt>>,
         terminators: Vec<LoweredTerminator>,
+        /// `(predecessor, join) -> value`: what
+        /// [`StructuringHost::lower_return_join_expr_for_predecessor`]
+        /// answers. Empty unless a test sets it.
+        pub(crate) return_join_exprs: Vec<((usize, usize), PreHirExpr)>,
     }
 
     impl MockRotatedLoopHost {
-        fn new(
+        pub(crate) fn new(
             successors: Vec<Vec<usize>>,
             block_addrs: Vec<u64>,
             stmts: Vec<Vec<PreHirStmt>>,
@@ -2810,6 +2816,7 @@ mod tests {
                 block_addrs,
                 stmts,
                 terminators,
+                return_join_exprs: Vec::new(),
             }
         }
     }
@@ -2962,10 +2969,14 @@ mod tests {
         }
         fn lower_return_join_expr_for_predecessor(
             &mut self,
-            _pred_idx: usize,
-            _join_idx: usize,
+            pred_idx: usize,
+            join_idx: usize,
         ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
-            Ok(None)
+            Ok(self
+                .return_join_exprs
+                .iter()
+                .find(|(edge, _)| *edge == (pred_idx, join_idx))
+                .map(|(_, expr)| expr.clone()))
         }
         fn lower_linear_body(
             &mut self,

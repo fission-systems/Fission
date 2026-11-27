@@ -361,6 +361,105 @@ fn concede_one_edge(graph: &mut CollapseGraph, failed: Option<&Shape>) -> bool {
     false
 }
 
+/// Give every edge into a return join a `return` of the value that edge
+/// carries, as a copy of the join of its own.
+///
+/// A merged `ret` block is lowered once, and on x86-64 its own `return`
+/// names whatever value its block-local lowering finds -- right for some
+/// predecessors and not others (the join moves a register the predecessors
+/// set differently, or restores callee-saved registers over it). The builder
+/// owns the per-edge answer, [`StructuringHost::lower_return_join_expr_for_predecessor`],
+/// which the linear and SESE paths use on every edge into such a block. A
+/// driver that folds the graph instead must ask the same question, or a
+/// jump to, a fold through, or a copy of the join returns the wrong value on
+/// every other way in.
+///
+/// Runs on the graph as built, while every node is still one block, so a
+/// predecessor node is exactly the block whose edge it is. Only a join whose
+/// statements are register moves -- assignments to variables, with no call
+/// that could have an effect -- is rewritten: those are what the per-edge
+/// value replaces. A predecessor the builder has no answer for keeps the
+/// shared join. Returns how many edges were given their own `return`.
+pub(crate) fn split_return_joins(
+    host: &mut impl StructuringHost,
+    graph: &mut CollapseGraph,
+) -> Result<usize, MlilPreviewError> {
+    let joins: Vec<NodeId> = graph
+        .live_nodes()
+        .filter(|&n| graph.successors(n).is_empty() && graph.predecessors(n).len() >= 2)
+        .collect();
+    let mut given = 0usize;
+    for join in joins {
+        let Some(node) = graph.node(join) else {
+            continue;
+        };
+        if node.body.is_some() {
+            continue;
+        }
+        let join_block = node.entry_block;
+        let Some(generic) = node_statements(host, graph, join)? else {
+            continue;
+        };
+        if !is_register_move_return(&generic) {
+            continue;
+        }
+        let preds: Vec<NodeId> = graph.predecessors(join).to_vec();
+        let mut own: Vec<(NodeId, PreHirExpr)> = Vec::new();
+        for &pred in &preds {
+            let Some(pred_node) = graph.node(pred) else {
+                continue;
+            };
+            if pred_node.body.is_some() {
+                continue;
+            }
+            let pred_block = pred_node.entry_block;
+            if let Some(value) =
+                host.lower_return_join_expr_for_predecessor(pred_block, join_block)?
+            {
+                own.push((pred, value));
+            }
+        }
+        if own.is_empty() {
+            continue;
+        }
+        // The join keeps one way in. When every way in has its own value it
+        // keeps the first, rewritten too; otherwise it keeps the ways in the
+        // builder has no answer for, unchanged.
+        let keep = (own.len() == preds.len()).then(|| own.remove(0));
+        for (pred, value) in own {
+            if graph
+                .split_exit_for(join, pred, vec![PreHirStmt::Return(Some(value))])
+                .is_some()
+            {
+                given += 1;
+            }
+        }
+        if let Some((_, value)) = keep {
+            graph.set_body(join, vec![PreHirStmt::Return(Some(value))]);
+            graph.set_governing_block(join, None);
+            given += 1;
+        }
+    }
+    Ok(given)
+}
+
+/// Whether `body` is assignments to variables, none making a call that
+/// could have an effect, followed by its `return`.
+fn is_register_move_return(body: &[PreHirStmt]) -> bool {
+    let Some((PreHirStmt::Return(_), rest)) = body.split_last() else {
+        return false;
+    };
+    rest.iter().all(|stmt| {
+        matches!(
+            stmt,
+            PreHirStmt::Assign {
+                lhs: fission_midend_prehir::PreHirLValue::Var(_),
+                rhs,
+            } if !expr_has_side_effecting_call(rhs)
+        )
+    })
+}
+
 /// Statements a node contributes, including the `return` a terminal block
 /// ends with.
 ///
