@@ -215,16 +215,6 @@ pub enum ProjectError {
         expected: ProjectRevision,
         current: ProjectRevision,
     },
-    #[error(
-        "project commit outcome uncertain at {path} (revision {revision}, barrier={durability_barrier}): {reason}: {source}"
-    )]
-    CommitUncertain {
-        path: PathBuf,
-        revision: ProjectRevision,
-        durability_barrier: &'static str,
-        reason: String,
-        source: std::io::Error,
-    },
     #[error("project recovery refused for {path}: {reason}")]
     RecoveryRefused { path: PathBuf, reason: String },
 }

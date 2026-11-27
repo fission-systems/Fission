@@ -64,6 +64,11 @@
 //! - On hardware with volatile write caches or network/FUSE filesystems, POSIX
 //!   `sync_all` cannot guarantee physical power-loss survival; tests validate
 //!   process-crash and injected I/O failure recovery, not hardware power cuts.
+//! - A parent directory `sync_all` that fails outright after the replacement
+//!   landed does not fail the commit: the receipt reports
+//!   [`CommitDurability::AtomicOnlyDirectorySyncFailed`] plus the underlying
+//!   error in [`CommitReceipt::durability_error`], because the new bytes are
+//!   already visible and a retry could only conflict.
 use super::*;
 use std::collections::HashSet;
 use std::fmt;
@@ -346,6 +351,11 @@ pub enum CommitDurability {
     /// Temporary file contents were synced and atomically linked/renamed, but
     /// parent directory `sync_all` is unsupported on this platform/filesystem.
     AtomicOnlyDirSyncUnsupported,
+    /// The replacement landed, but the parent directory `sync_all` failed, so
+    /// the rename may not survive a crash even though every current reader sees
+    /// the new bytes. The commit is published; only its crash durability is
+    /// uncertain.
+    AtomicOnlyDirectorySyncFailed,
 }
 
 /// Result returned when committing a project with explicit durability details.
@@ -354,6 +364,9 @@ pub struct CommitReceipt {
     pub revision: ProjectRevision,
     pub durability: CommitDurability,
     pub temp_cleanup_error: Option<String>,
+    /// OS error that downgraded [`Self::durability`] to
+    /// [`CommitDurability::AtomicOnlyDirectorySyncFailed`], when that happened.
+    pub durability_error: Option<String>,
 }
 
 /// Parsed identity metadata from a `<project>.lock` file.
@@ -956,8 +969,9 @@ impl ProjectLock {
     ///
     /// Returns the [`ProjectRevision`] of exactly the bytes this call
     /// persisted, or [`ProjectError::Conflict`] without altering the file on
-    /// mismatch. Post-replacement durability barrier failures return
-    /// [`ProjectError::CommitUncertain`].
+    /// mismatch. A post-replacement durability barrier failure is not an
+    /// error: the bytes are already published, so it is reported as a
+    /// downgraded [`CommitDurability`] by [`Self::write_checked_with_receipt`].
     pub fn write_checked(
         &self,
         project: &Project,
@@ -1159,19 +1173,25 @@ impl ProjectLock {
         };
         let revision = ProjectRevision::present(digest, len, identity);
 
-        let durability =
-            sync_parent_directory(&self.path).map_err(|source| ProjectError::CommitUncertain {
-                path: self.path.clone(),
-                revision: revision.clone(),
-                durability_barrier: "parent_dir_sync",
-                reason: "parent directory metadata sync failed after atomic replacement; the new project bytes are present on disk but crash durability is uncertain".into(),
-                source,
-            })?;
+        let (durability, durability_error) = match sync_parent_directory(&self.path) {
+            Ok(durability) => (durability, None),
+            Err(source) => {
+                // The rename already landed, so every reader sees the new
+                // bytes. Reporting an error here would tell the caller the
+                // commit failed and invite a retry that can only conflict;
+                // downgrade the durability classification instead.
+                (
+                    CommitDurability::AtomicOnlyDirectorySyncFailed,
+                    Some(source.to_string()),
+                )
+            }
+        };
 
         Ok(CommitReceipt {
             revision,
             durability,
             temp_cleanup_error,
+            durability_error,
         })
     }
 
@@ -1944,26 +1964,25 @@ mod tests {
         );
         assert_eq!(Project::read(&path).unwrap().unwrap(), next);
 
-        // Post-replacement dir-sync failure classifies the outcome as
-        // CommitUncertain, distinct from pre-commit Write, while disk holds the
-        // complete valid new project (never a torn/mixed state).
+        // Post-replacement dir-sync failure is still a published commit: the
+        // receipt must report the downgraded durability instead of an error,
+        // because disk holds the complete valid new project and a retry would
+        // only conflict.
         let mut third = next.clone();
         third.set_name(0x1000, "after_uncertain");
         set_fault_point(Some(FaultPoint::DirSyncFail));
         let uncertain = third
             .commit_checked_with_receipt(&path, CommitPrecondition::IfRevision(receipt.revision))
-            .expect_err("injected dir sync failure must surface CommitUncertain");
-        let uncertain_rev = match uncertain {
-            ProjectError::CommitUncertain {
-                revision,
-                durability_barrier,
-                ..
-            } => {
-                assert_eq!(durability_barrier, "parent_dir_sync");
-                revision
-            }
-            other => panic!("expected CommitUncertain, got {other:?}"),
-        };
+            .expect("a landed commit must not be reported as an error");
+        assert_eq!(
+            uncertain.durability,
+            CommitDurability::AtomicOnlyDirectorySyncFailed
+        );
+        assert!(
+            uncertain.durability_error.is_some(),
+            "downgraded durability must keep the underlying io error"
+        );
+        let uncertain_rev = uncertain.revision;
         let (reopened, reopened_rev) = Project::read_with_revision(&path).unwrap();
         assert_eq!(reopened.unwrap(), third);
         assert_eq!(reopened_rev.summary(), uncertain_rev.summary());
