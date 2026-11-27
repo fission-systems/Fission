@@ -80,6 +80,8 @@ FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, 
 
 Every install channel uses one layout, `<prefix>/bin/fission_cli` beside `<prefix>/share/fission/{sleigh-specs,signatures,ghidra-data}`, which the binary finds as `exe_parent/../share/fission` with no configuration: Homebrew (`<cellar>/share/fission`), `install.sh` (`~/.local`), an unpacked release archive, and `cargo install` plus `fission-resources.tar.gz` unpacked into `~/.cargo/share/fission`.
 
+On Unix, `install.sh` stores immutable versioned generations under `<prefix>/lib/fission/releases/<generation>/` and flips `<prefix>/lib/fission/current` atomically after staging, archive safety checks, checksum/manifest checks, silent-downgrade guards (`--allow-downgrade` to override), and pre/post-activation health checks; already-running processes stay pinned to their generation while new invocations see `current`. Use `--rollback` to restore both the previous binary and resources, `--prune` to remove old generations beyond `--keep`, `--uninstall` to remove Fission-managed files while preserving custom files under `<prefix>/share/fission`, or `FISSION_ARCHIVE=<path>` (`--require-checksum` to fail without `.sha256`) for offline installation. Windows remains documented as manual extraction of the release `.zip` archive.
+
 ### Overrides
 
 | Mechanism | Notes |
