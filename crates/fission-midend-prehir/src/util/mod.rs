@@ -22,5 +22,5 @@ pub use label_cleanup::{
 pub use logic::{fold_logical_chain, negate_expr, simplify_logical_expr, strip_casts};
 pub use print::{format_expr_key, format_lvalue_key};
 pub use temp::next_temp_name;
-pub use var_rename::{rename_vars_in_expr, rename_vars_in_stmts};
+pub use var_rename::{rename_vars_in_expr, rename_vars_in_function_refs, rename_vars_in_stmts};
 pub use work::{pre_hir_body_expr_nodes_fit_budget, pre_hir_function_expr_nodes_fit_budget};

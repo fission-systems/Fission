@@ -145,7 +145,7 @@ pub(super) fn apply_binding_surface_renames(
     if renames.is_empty() {
         return 0;
     }
-    rename_vars_in_stmts(&mut func.body, &renames);
+    fission_midend_prehir::util::rename_vars_in_function_refs(func, &renames);
     renames.len()
 }
 

@@ -8,7 +8,7 @@ use crate::HashSet;
 use crate::analysis::defuse::DefUseMap;
 use fission_midend_core::ir::{NirBindingOrigin, NirType};
 use fission_midend_core::{AbiState, CallingConvention, float_param_bits_for_name};
-use fission_midend_prehir::util::rename_vars_in_stmts;
+use fission_midend_prehir::util::rename_vars_in_function_refs;
 use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
 use std::collections::BTreeSet;
 
@@ -572,7 +572,7 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
         }
     }
     if !renames.is_empty() {
-        rename_vars_in_stmts(&mut func.body, &renames);
+        rename_vars_in_function_refs(func, &renames);
     }
     promotions
 }
@@ -931,7 +931,7 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
         promotions += 1;
     }
 
-    rename_vars_in_stmts(&mut func.body, &renames);
+    rename_vars_in_function_refs(func, &renames);
     remove_redundant_param_hw_copies(&mut func.body, abi, func.is_64bit);
     promotions += promote_direct_param_register_reads(func);
     let _ = trim_unused_variadic_tail_params(func);
@@ -1125,5 +1125,62 @@ mod tests {
         assert!(!apply_entry_param_promotion_pass(&mut func));
         assert!(func.params.is_empty());
         assert!(func.locals.iter().any(|b| b.name == "uVar1"));
+    }
+
+    #[test]
+    fn promoted_param_rewrites_local_initializer_refs() {
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let func = PreHirFunction {
+            name: "promoted_with_slot_init".to_string(),
+            locals: vec![PreHirBinding {
+                name: "slot_8".to_string(),
+                ty: ptr_ty,
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: Some(PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("rcx".to_string())),
+                    offset: 8,
+                }),
+            }],
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("slot_8".to_string())),
+                ty: NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+            }))],
+            calling_convention: CallingConvention::WindowsX64,
+            is_64bit: true,
+            int_param_offsets: vec![0x08],
+            ..Default::default()
+        };
+        assert_eq!(
+            func.locals[0].initializer,
+            Some(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("rcx".to_string())),
+                offset: 8,
+            })
+        );
+        // Simulate direct register promotion when an entry register feeds both body and initializer.
+        let mut promoted = func.clone();
+        promoted.body.insert(
+            0,
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("uVar1".to_string()),
+                rhs: PreHirExpr::Var("rcx".to_string()),
+            },
+        );
+        assert!(apply_entry_param_promotion_pass(&mut promoted));
+        assert!(promoted.params.iter().any(|p| p.name == "param_1"));
+        assert_eq!(
+            promoted.locals[0].initializer,
+            Some(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("param_1".to_string())),
+                offset: 8,
+            })
+        );
     }
 }
