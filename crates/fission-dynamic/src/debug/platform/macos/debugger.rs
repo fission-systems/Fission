@@ -64,8 +64,8 @@ struct StepInFlight {
 pub struct MacOSDebugger {
     state: DebugState,
     target_pid: Option<u32>,
-    /// The target's task port while attached.
-    task: Option<mach::mach_port_t>,
+    /// The target's task port while attached (released once on drop).
+    task: Option<mach::OwnedMachPort>,
     /// Thread ports from the last stop, main thread first.
     threads: Vec<mach::mach_port_t>,
     /// The id each port in `threads` is reported under, in the same order.
@@ -125,6 +125,8 @@ impl MacOSDebugger {
 
     fn task(&self) -> FissionResult<mach::mach_port_t> {
         self.task
+            .as_ref()
+            .map(mach::OwnedMachPort::raw)
             .ok_or_else(|| FissionError::debug("Not attached to a process"))
     }
 
@@ -146,9 +148,7 @@ impl MacOSDebugger {
         for port in self.threads.drain(..) {
             mach::release_port(port);
         }
-        if let Some(task) = self.task.take() {
-            mach::release_port(task);
-        }
+        self.task.take();
     }
 
     /// Refresh thread ports and the thread table. The main thread is reported

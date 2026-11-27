@@ -7,10 +7,17 @@
 
 #![allow(non_camel_case_types)]
 
+use std::collections::HashSet;
+use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, mpsc};
 use std::time::Duration;
 
 pub type mach_port_t = u32;
 pub type kern_return_t = i32;
+
+pub const MACH_PORT_NULL: mach_port_t = 0;
+pub const DEFAULT_MAX_IN_FLIGHT_TASK_PORTS: usize = 4;
 
 pub const KERN_SUCCESS: kern_return_t = 0;
 pub(crate) const KERN_INVALID_ADDRESS: kern_return_t = 1;
@@ -115,15 +122,34 @@ fn check(call: &str, kr: kern_return_t) -> Result<(), String> {
     }
 }
 
-/// How `task_for_pid` ended.
-#[derive(Debug, PartialEq, Eq)]
+/// How `task_for_pid` acquisition ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskPortError {
     /// The kernel or `taskgated` refused.
     Denied(kern_return_t),
-    /// The request did not come back. On a machine where Developer Tools
-    /// access has not been authorized, `taskgated` waits for an interactive
-    /// authorization that a headless caller can never answer.
-    TimedOut,
+    /// The caller's deadline elapsed before `task_for_pid` returned.
+    ///
+    /// Note: macOS `task_for_pid` is a blocking Mach trap that cannot be
+    /// asynchronously cancelled mid-call; timeout stops the caller from waiting,
+    /// ensures any right acquired afterwards is immediately released instead of
+    /// leaking, and leaves the in-flight worker slot accounted for until the OS
+    /// call completes.
+    TimedOut { pid: u32, in_flight: usize },
+    /// Too many authorization requests are already in flight (or this PID
+    /// already has an unresolved request waiting on the OS/prompt); refused
+    /// without spawning another blocked thread.
+    Busy {
+        pid: u32,
+        in_flight: usize,
+        limit: usize,
+        pid_already_pending: bool,
+    },
+    /// The acquisition worker exited or panicked before sending an outcome
+    /// (explicitly distinct from `TimedOut`).
+    Disconnected { pid: u32, detail: String },
+    /// `task_for_pid` reported `KERN_SUCCESS` with `MACH_PORT_NULL` (`0`),
+    /// which is not a valid send right.
+    NullPort { pid: u32 },
 }
 
 impl TaskPortError {
@@ -140,33 +166,305 @@ impl TaskPortError {
             }
             // Observed: a signed caller waits on an authorization prompt while
             // Developer Tools access is off.
-            Self::TimedOut => {
-                "macOS is waiting for Developer Tools access to be authorized. \
-                 Run `sudo DevToolsSecurity -enable` once (your user must be in the \
-                 `_developer` group), or run fission as root"
+            Self::TimedOut { .. } => {
+                "macOS did not respond before the deadline (for example, `taskgated` may \
+                 be waiting for Developer Tools authorization). Run `sudo DevToolsSecurity \
+                 -enable` once (your user must be in the `_developer` group), or run fission \
+                 as root. Late rights are automatically released, though the OS call itself \
+                 cannot be forcibly aborted."
+            }
+            Self::Busy { .. } => {
+                "Bounded task-port authorization concurrency limit reached (or this PID already \
+                 has an in-flight authorization call); authorize Developer Tools access or wait \
+                 for blocked authorization prompts to clear instead of spawning more requests"
+            }
+            Self::Disconnected { .. } => {
+                "Task-port acquisition worker terminated without returning a port; check system \
+                 logs or retry"
+            }
+            Self::NullPort { .. } => {
+                "Kernel reported KERN_SUCCESS for task_for_pid but returned MACH_PORT_NULL; target \
+                 may have exited during attach"
             }
         }
     }
 }
 
-/// The task port for `pid`, or why it could not be had.
+#[derive(Clone)]
+enum PortReleaser {
+    System,
+    Custom(Arc<dyn Fn(mach_port_t) + Send + Sync>),
+}
+
+/// Exclusive RAII owner of an acquired Mach send right.
 ///
-/// The call runs on its own thread so that an authorization prompt nobody can
-/// answer ends as [`TaskPortError::TimedOut`] instead of hanging the caller.
-/// A thread that never returns is left behind; it holds nothing.
-pub fn task_port_for_pid(pid: u32, timeout: Duration) -> Result<mach_port_t, TaskPortError> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut task: mach_port_t = 0;
-        // SAFETY: `task` is a valid out-pointer; `mach_task_self_` is set by libSystem.
-        let kr = unsafe { task_for_pid(mach_task_self_, pid as i32, &mut task) };
-        let _ = sender.send((kr, task));
-    });
-    match receiver.recv_timeout(timeout) {
-        Ok((KERN_SUCCESS, task)) => Ok(task),
-        Ok((kr, _)) => Err(TaskPortError::Denied(kr)),
-        Err(_) => Err(TaskPortError::TimedOut),
+/// Deallocates the underlying right **exactly once** on drop unless explicitly
+/// transferred via [`Self::into_raw`]. Never `Copy` or `Clone`, and rejects
+/// `MACH_PORT_NULL` (`0`).
+pub struct OwnedMachPort {
+    port: Option<mach_port_t>,
+    pid: Option<u32>,
+    releaser: PortReleaser,
+}
+
+impl fmt::Debug for OwnedMachPort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OwnedMachPort")
+            .field("port", &self.port)
+            .field("pid", &self.pid)
+            .finish()
     }
+}
+
+impl OwnedMachPort {
+    /// Wrap a newly acquired OS send right (`None` if `port == MACH_PORT_NULL`).
+    #[must_use]
+    pub fn from_system(port: mach_port_t, pid: Option<u32>) -> Option<Self> {
+        if port == MACH_PORT_NULL {
+            None
+        } else {
+            Some(Self {
+                port: Some(port),
+                pid,
+                releaser: PortReleaser::System,
+            })
+        }
+    }
+
+    /// Wrap a send right with an explicit release callback (for deterministic tests).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn with_releaser(
+        port: mach_port_t,
+        pid: Option<u32>,
+        releaser: Arc<dyn Fn(mach_port_t) + Send + Sync>,
+    ) -> Option<Self> {
+        if port == MACH_PORT_NULL {
+            None
+        } else {
+            Some(Self {
+                port: Some(port),
+                pid,
+                releaser: PortReleaser::Custom(releaser),
+            })
+        }
+    }
+
+    /// Borrow the underlying raw send right while `self` remains alive.
+    #[must_use]
+    pub fn raw(&self) -> mach_port_t {
+        self.port.expect("OwnedMachPort still valid before drop")
+    }
+
+    /// Target PID associated with this task port, if any.
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    /// Consume the RAII wrapper and return the raw send right without releasing it.
+    /// The caller assumes responsibility for eventually releasing the port.
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn into_raw(mut self) -> mach_port_t {
+        self.port
+            .take()
+            .expect("OwnedMachPort still valid before into_raw")
+    }
+}
+
+impl Drop for OwnedMachPort {
+    fn drop(&mut self) {
+        if let Some(port) = self.port.take()
+            && port != MACH_PORT_NULL
+        {
+            match &self.releaser {
+                PortReleaser::System => release_port(port),
+                PortReleaser::Custom(release) => release(port),
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct CoordinatorState {
+    in_flight: usize,
+    pending_pids: HashSet<u32>,
+}
+
+struct InFlightGuard {
+    state: Arc<Mutex<CoordinatorState>>,
+    pid: u32,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        guard.in_flight = guard.in_flight.saturating_sub(1);
+        guard.pending_pids.remove(&self.pid);
+    }
+}
+
+/// Bounded coordinator for blocking macOS task-port acquisition requests.
+///
+/// Ensures:
+/// 1. At most `max_in_flight` OS acquisition threads can be active concurrently
+///    and duplicate requests for an already-pending PID fail fast with [`TaskPortError::Busy`].
+/// 2. Any acquired send right is wrapped in [`OwnedMachPort`] immediately upon
+///    acquisition, so late successes after timeout, dropped receivers, or worker
+///    panics release the right **exactly once**.
+pub struct TaskPortCoordinator {
+    limit: usize,
+    state: Arc<Mutex<CoordinatorState>>,
+}
+
+impl TaskPortCoordinator {
+    /// Construct a coordinator allowing at most `limit` concurrent acquisition calls.
+    #[must_use]
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit: limit.max(1),
+            state: Arc::new(Mutex::new(CoordinatorState::default())),
+        }
+    }
+
+    /// Current number of active in-flight acquisition calls.
+    #[must_use]
+    pub fn in_flight(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .in_flight
+    }
+
+    /// Acquire a task port for `pid` using `acquire_fn`, bounded by `timeout`
+    /// and this coordinator's in-flight limit.
+    pub fn acquire_with<F>(
+        &self,
+        pid: u32,
+        timeout: Duration,
+        acquire_fn: F,
+    ) -> Result<OwnedMachPort, TaskPortError>
+    where
+        F: FnOnce(u32) -> Result<OwnedMachPort, TaskPortError> + Send + 'static,
+    {
+        let (slot_guard, active_in_flight) = {
+            let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.pending_pids.contains(&pid) {
+                return Err(TaskPortError::Busy {
+                    pid,
+                    in_flight: guard.in_flight,
+                    limit: self.limit,
+                    pid_already_pending: true,
+                });
+            }
+            if guard.in_flight >= self.limit {
+                return Err(TaskPortError::Busy {
+                    pid,
+                    in_flight: guard.in_flight,
+                    limit: self.limit,
+                    pid_already_pending: false,
+                });
+            }
+            guard.in_flight += 1;
+            guard.pending_pids.insert(pid);
+            let active = guard.in_flight;
+            (
+                InFlightGuard {
+                    state: Arc::clone(&self.state),
+                    pid,
+                },
+                active,
+            )
+        };
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled_worker = Arc::clone(&cancelled);
+        let (sender, receiver) = mpsc::sync_channel::<Result<OwnedMachPort, TaskPortError>>(1);
+
+        let spawn_result = std::thread::Builder::new()
+            .name(format!("fission-task-port-{pid}"))
+            .spawn(move || {
+                // `_slot_guard` stays alive for the full duration of `acquire_fn`
+                // and releases its slot + pending PID even on panic unwind.
+                let _slot_guard = slot_guard;
+                if cancelled_worker.load(Ordering::Acquire) {
+                    return;
+                }
+                let outcome = acquire_fn(pid);
+                if cancelled_worker.load(Ordering::Acquire) {
+                    // Explicit drop releases any acquired send right immediately.
+                    drop(outcome);
+                    return;
+                }
+                if let Err(mpsc::SendError(unreceived)) = sender.send(outcome) {
+                    // Receiver already disconnected/timed out: drop releases once.
+                    drop(unreceived);
+                }
+            });
+
+        if let Err(err) = spawn_result {
+            return Err(TaskPortError::Disconnected {
+                pid,
+                detail: format!("failed to spawn task-port worker thread: {err}"),
+            });
+        }
+
+        match receiver.recv_timeout(timeout) {
+            Ok(outcome) => outcome,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Prevent a late worker send from ever being read by any caller
+                // and drop `receiver` immediately so buffered ports drop now.
+                cancelled.store(true, Ordering::Release);
+                drop(receiver);
+                Err(TaskPortError::TimedOut {
+                    pid,
+                    in_flight: active_in_flight,
+                })
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                cancelled.store(true, Ordering::Release);
+                drop(receiver);
+                Err(TaskPortError::Disconnected {
+                    pid,
+                    detail:
+                        "task-port acquisition worker exited or panicked without sending a result"
+                            .to_string(),
+                })
+            }
+        }
+    }
+}
+
+static TASK_PORT_COORDINATOR: LazyLock<TaskPortCoordinator> =
+    LazyLock::new(|| TaskPortCoordinator::new(DEFAULT_MAX_IN_FLIGHT_TASK_PORTS));
+
+fn os_task_for_pid(pid: u32) -> Result<OwnedMachPort, TaskPortError> {
+    let mut task: mach_port_t = MACH_PORT_NULL;
+    // SAFETY: `task` is a valid out-pointer; `mach_task_self_` is set by libSystem.
+    let kr = unsafe { task_for_pid(mach_task_self_, pid as i32, &mut task) };
+    if kr != KERN_SUCCESS {
+        return Err(TaskPortError::Denied(kr));
+    }
+    OwnedMachPort::from_system(task, Some(pid)).ok_or(TaskPortError::NullPort { pid })
+}
+
+/// Number of currently active OS `task_for_pid` authorization calls.
+#[must_use]
+#[allow(dead_code)]
+pub fn task_port_in_flight_count() -> usize {
+    TASK_PORT_COORDINATOR.in_flight()
+}
+
+/// Acquire the Mach task port for `pid`, or report why it could not be obtained.
+///
+/// The blocking `task_for_pid` trap runs on a bounded worker pool so an
+/// unanswered `taskgated` prompt ends as [`TaskPortError::TimedOut`] (and
+/// excess concurrent requests return [`TaskPortError::Busy`]) instead of hanging
+/// or leaking threads/ports. Any send right returned after timeout or receiver
+/// cancellation is released **exactly once** by [`OwnedMachPort`].
+pub fn task_port_for_pid(pid: u32, timeout: Duration) -> Result<OwnedMachPort, TaskPortError> {
+    TASK_PORT_COORDINATOR.acquire_with(pid, timeout, os_task_for_pid)
 }
 
 /// Borrow this process's Mach task port (never deallocate via `release_port`).
@@ -320,9 +618,7 @@ pub fn region_protection(task: mach_port_t, address: u64) -> Result<(u64, u64, i
             &mut object,
         )
     })?;
-    if object != 0 {
-        release_port(object);
-    }
+    let _object_guard = OwnedMachPort::from_system(object, None);
     if start > address {
         return Err(format!("no memory is mapped at 0x{address:x}"));
     }
@@ -735,5 +1031,267 @@ mod tests {
             matches!(result, Err(TaskPortError::Denied(_))),
             "{result:?}"
         );
+    }
+
+    fn wait_until(cond: impl Fn() -> bool) {
+        for _ in 0..400 {
+            if cond() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timed out waiting for background worker cleanup");
+    }
+
+    #[test]
+    fn owned_mach_port_releases_once_on_drop_and_not_when_transferred() {
+        use std::sync::{Arc, Mutex};
+
+        let released = Arc::new(Mutex::new(Vec::<mach_port_t>::new()));
+        let rec: Arc<dyn Fn(mach_port_t) + Send + Sync> = {
+            let released = Arc::clone(&released);
+            Arc::new(move |p| released.lock().unwrap().push(p))
+        };
+
+        assert!(OwnedMachPort::from_system(MACH_PORT_NULL, Some(1)).is_none());
+        assert!(OwnedMachPort::with_releaser(MACH_PORT_NULL, Some(1), Arc::clone(&rec)).is_none());
+
+        {
+            let port = OwnedMachPort::with_releaser(0x4242, Some(10), Arc::clone(&rec))
+                .expect("non-null port");
+            assert_eq!(port.raw(), 0x4242);
+            assert_eq!(port.pid(), Some(10));
+        }
+        assert_eq!(*released.lock().unwrap(), vec![0x4242]);
+
+        let transferred = OwnedMachPort::with_releaser(0x5555, None, Arc::clone(&rec))
+            .expect("non-null port")
+            .into_raw();
+        assert_eq!(transferred, 0x5555);
+        assert_eq!(*released.lock().unwrap(), vec![0x4242]);
+    }
+
+    #[test]
+    fn mock_late_success_after_timeout_releases_right_once_and_never_leaks_stale_port() {
+        use std::sync::{Arc, Barrier, Mutex};
+
+        let released = Arc::new(Mutex::new(Vec::<mach_port_t>::new()));
+        let rec: Arc<dyn Fn(mach_port_t) + Send + Sync> = {
+            let released = Arc::clone(&released);
+            Arc::new(move |p| released.lock().unwrap().push(p))
+        };
+
+        let coordinator = TaskPortCoordinator::new(2);
+        let gate = Arc::new(Barrier::new(2));
+
+        let gate_worker = Arc::clone(&gate);
+        let rec_worker = Arc::clone(&rec);
+        let err = coordinator
+            .acquire_with(101, Duration::from_millis(20), move |pid| {
+                gate_worker.wait();
+                Ok(OwnedMachPort::with_releaser(0x1111, Some(pid), rec_worker).unwrap())
+            })
+            .expect_err("caller deadline must expire");
+
+        assert!(
+            matches!(
+                err,
+                TaskPortError::TimedOut {
+                    pid: 101,
+                    in_flight: 1
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(coordinator.in_flight(), 1);
+        assert!(released.lock().unwrap().is_empty());
+
+        // Let the late OS acquisition finish and hand off `0x1111`.
+        gate.wait();
+        wait_until(|| coordinator.in_flight() == 0);
+        assert_eq!(*released.lock().unwrap(), vec![0x1111]);
+
+        // Subsequent acquisition for the same PID receives a fresh right, never `0x1111`.
+        let rec_fresh = Arc::clone(&rec);
+        let fresh = coordinator
+            .acquire_with(101, Duration::from_secs(1), move |pid| {
+                Ok(OwnedMachPort::with_releaser(0x2222, Some(pid), rec_fresh).unwrap())
+            })
+            .expect("subsequent acquisition must succeed");
+        assert_eq!(fresh.raw(), 0x2222);
+        drop(fresh);
+        assert_eq!(*released.lock().unwrap(), vec![0x1111, 0x2222]);
+    }
+
+    #[test]
+    fn mock_worker_panic_distinguishes_disconnected_from_timeout_and_cleans_up() {
+        use std::sync::{Arc, Mutex};
+
+        let released = Arc::new(Mutex::new(Vec::<mach_port_t>::new()));
+        let rec: Arc<dyn Fn(mach_port_t) + Send + Sync> = {
+            let released = Arc::clone(&released);
+            Arc::new(move |p| released.lock().unwrap().push(p))
+        };
+        let coordinator = TaskPortCoordinator::new(2);
+
+        // 1. Panic after constructing OwnedMachPort must release it once and yield Disconnected.
+        let rec_panic = Arc::clone(&rec);
+        let err = coordinator
+            .acquire_with(202, Duration::from_secs(1), move |pid| {
+                let _held = OwnedMachPort::with_releaser(0x3333, Some(pid), rec_panic).unwrap();
+                panic!("simulated worker panic after port acquisition");
+            })
+            .expect_err("worker panic must yield Disconnected");
+        assert!(matches!(err, TaskPortError::Disconnected { pid: 202, .. }));
+        wait_until(|| coordinator.in_flight() == 0);
+        assert_eq!(*released.lock().unwrap(), vec![0x3333]);
+
+        // 2. Denied and NullPort do not trigger spurious releases or leak slots.
+        let denied = coordinator
+            .acquire_with(203, Duration::from_secs(1), |_| {
+                Err(TaskPortError::Denied(5))
+            })
+            .expect_err("denied expected");
+        assert_eq!(denied, TaskPortError::Denied(5));
+        let rec_null = Arc::clone(&rec);
+        let null_err = coordinator
+            .acquire_with(204, Duration::from_secs(1), move |pid| {
+                OwnedMachPort::with_releaser(MACH_PORT_NULL, Some(pid), rec_null)
+                    .ok_or(TaskPortError::NullPort { pid })
+            })
+            .expect_err("null port expected");
+        assert_eq!(null_err, TaskPortError::NullPort { pid: 204 });
+        wait_until(|| coordinator.in_flight() == 0);
+        assert_eq!(*released.lock().unwrap(), vec![0x3333]);
+    }
+
+    #[test]
+    fn bounded_in_flight_limit_and_per_pid_dedup_reject_excess_without_spawning() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier, Mutex};
+
+        let released = Arc::new(Mutex::new(Vec::<mach_port_t>::new()));
+        let rec: Arc<dyn Fn(mach_port_t) + Send + Sync> = {
+            let released = Arc::clone(&released);
+            Arc::new(move |p| released.lock().unwrap().push(p))
+        };
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let coordinator = TaskPortCoordinator::new(2);
+        let gate1 = Arc::new(Barrier::new(2));
+        let gate2 = Arc::new(Barrier::new(2));
+
+        // Fill slot 1 (PID 301) and time out caller.
+        {
+            let gate1_w = Arc::clone(&gate1);
+            let rec_w = Arc::clone(&rec);
+            let calls_w = Arc::clone(&calls);
+            let err = coordinator
+                .acquire_with(301, Duration::from_millis(15), move |pid| {
+                    calls_w.fetch_add(1, Ordering::SeqCst);
+                    gate1_w.wait();
+                    Ok(OwnedMachPort::with_releaser(0x4001, Some(pid), rec_w).unwrap())
+                })
+                .unwrap_err();
+            assert!(matches!(err, TaskPortError::TimedOut { pid: 301, .. }));
+        }
+
+        // Same PID 301 while still pending -> rejected as Busy(pid_already_pending: true) without invoking worker.
+        let calls_before_dup = calls.load(Ordering::SeqCst);
+        let dup_err = coordinator
+            .acquire_with(301, Duration::from_millis(50), {
+                let calls_w = Arc::clone(&calls);
+                move |_| {
+                    calls_w.fetch_add(1, Ordering::SeqCst);
+                    unreachable!("duplicate pending PID must not spawn");
+                }
+            })
+            .unwrap_err();
+        assert_eq!(
+            dup_err,
+            TaskPortError::Busy {
+                pid: 301,
+                in_flight: 1,
+                limit: 2,
+                pid_already_pending: true,
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), calls_before_dup);
+
+        // Fill slot 2 (PID 302) and time out caller.
+        {
+            let gate2_w = Arc::clone(&gate2);
+            let rec_w = Arc::clone(&rec);
+            let calls_w = Arc::clone(&calls);
+            let err = coordinator
+                .acquire_with(302, Duration::from_millis(15), move |pid| {
+                    calls_w.fetch_add(1, Ordering::SeqCst);
+                    gate2_w.wait();
+                    Ok(OwnedMachPort::with_releaser(0x4002, Some(pid), rec_w).unwrap())
+                })
+                .unwrap_err();
+            assert!(matches!(err, TaskPortError::TimedOut { pid: 302, .. }));
+        }
+        assert_eq!(coordinator.in_flight(), 2);
+
+        // Third distinct PID 303 exceeds concurrency limit 2 -> rejected as Busy without spawning.
+        let busy_err = coordinator
+            .acquire_with(303, Duration::from_millis(50), {
+                let calls_w = Arc::clone(&calls);
+                move |_| {
+                    calls_w.fetch_add(1, Ordering::SeqCst);
+                    unreachable!("over-limit request must not spawn");
+                }
+            })
+            .unwrap_err();
+        assert_eq!(
+            busy_err,
+            TaskPortError::Busy {
+                pid: 303,
+                in_flight: 2,
+                limit: 2,
+                pid_already_pending: false,
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        // Unblock both workers: late rights are released once each and slots return to 0.
+        gate1.wait();
+        gate2.wait();
+        wait_until(|| coordinator.in_flight() == 0);
+        let mut got = released.lock().unwrap().clone();
+        got.sort_unstable();
+        assert_eq!(got, vec![0x4001, 0x4002]);
+
+        // Slot 303 succeeds cleanly once capacity clears.
+        let ok = coordinator
+            .acquire_with(303, Duration::from_secs(1), move |pid| {
+                Ok(OwnedMachPort::with_releaser(0x4003, Some(pid), rec).unwrap())
+            })
+            .expect("capacity cleared");
+        assert_eq!(ok.raw(), 0x4003);
+        drop(ok);
+        assert!(released.lock().unwrap().contains(&0x4003));
+    }
+
+    #[test]
+    fn self_process_task_port_acquisition_handles_macos_self_pid_cleanly() {
+        let sentinel: u64 = 0xfeed_face_cafe_babe;
+        let addr = (&sentinel as *const u64) as u64;
+        match task_port_for_pid(std::process::id(), Duration::from_secs(5)) {
+            Ok(port) => {
+                assert_ne!(port.raw(), MACH_PORT_NULL);
+                assert_eq!(port.pid(), Some(std::process::id()));
+                let bytes = read_memory(port.raw(), addr, std::mem::size_of::<u64>())
+                    .expect("read own stack sentinel via acquired task port");
+                assert_eq!(bytes, sentinel.to_le_bytes());
+                drop(port);
+            }
+            Err(TaskPortError::Denied(_)) => {
+                // Allowed only if the host environment denies even self-PID task_for_pid.
+            }
+            Err(other) => panic!("unexpected self-PID task_port_for_pid error: {other:?}"),
+        }
+        wait_until(|| task_port_in_flight_count() == 0);
     }
 }

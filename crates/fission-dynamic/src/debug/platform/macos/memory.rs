@@ -9,34 +9,41 @@ use super::mach;
 use crate::debug::memory::{MemoryError, MemoryProtection, MemoryRegion, checked_transfer_len};
 use std::time::Duration;
 
+enum TaskPortHandle {
+    BorrowedSelf(mach::mach_port_t),
+    Owned(mach::OwnedMachPort),
+}
+
+impl TaskPortHandle {
+    fn raw(&self) -> mach::mach_port_t {
+        match self {
+            Self::BorrowedSelf(port) => *port,
+            Self::Owned(owned) => owned.raw(),
+        }
+    }
+}
+
 /// macOS-specific memory manager backed by Mach task VM calls.
 pub struct MacOSMemory {
-    /// Target Mach task port.
-    task: Option<mach::mach_port_t>,
-    /// Whether `task` was acquired for a foreign PID and must be deallocated on drop.
-    owns_port: bool,
+    /// Target Mach task port (RAII-owned when acquired for a foreign PID).
+    task: Option<TaskPortHandle>,
 }
 
 impl MacOSMemory {
     /// Create a new macOS memory manager.
     pub fn new() -> Self {
-        Self {
-            task: None,
-            owns_port: false,
-        }
+        Self { task: None }
     }
 
     fn release_task(&mut self) {
-        if let Some(port) = self.task.take() {
-            if self.owns_port {
-                mach::release_port(port);
-            }
-        }
-        self.owns_port = false;
+        self.task.take();
     }
 
     fn get_task(&self) -> Result<mach::mach_port_t, MemoryError> {
-        self.task.ok_or(MemoryError::NoProcess)
+        self.task
+            .as_ref()
+            .map(TaskPortHandle::raw)
+            .ok_or(MemoryError::NoProcess)
     }
 }
 
@@ -56,20 +63,21 @@ impl PlatformMemory for MacOSMemory {
     fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
         self.release_task();
         if pid == std::process::id() {
-            self.task = Some(mach::own_task_port());
-            self.owns_port = false;
+            self.task = Some(TaskPortHandle::BorrowedSelf(mach::own_task_port()));
             return Ok(());
         }
         let task =
             mach::task_port_for_pid(pid, Duration::from_secs(5)).map_err(|err| match err {
                 mach::TaskPortError::Denied(_) => MemoryError::AccessDenied { address: 0 },
-                mach::TaskPortError::TimedOut => MemoryError::ReadFailed {
+                mach::TaskPortError::TimedOut { .. }
+                | mach::TaskPortError::Busy { .. }
+                | mach::TaskPortError::Disconnected { .. }
+                | mach::TaskPortError::NullPort { .. } => MemoryError::ReadFailed {
                     address: 0,
-                    reason: err.remediation().to_string(),
+                    reason: format!("{err:?}: {}", err.remediation()),
                 },
             })?;
-        self.task = Some(task);
-        self.owns_port = true;
+        self.task = Some(TaskPortHandle::Owned(task));
         Ok(())
     }
 
