@@ -44,107 +44,453 @@ fn compute_sizes(mask: u64) -> Option<(u32, u32)> {
     Some((bitsize, flowsize))
 }
 
-/// Recursively scans statement trees to collect all local assignments and track multi-defined variables.
-fn collect_assignments(
-    stmts: &[PreHirStmt],
-    assigns: &mut Vec<AssignInfo>,
-    multi_def: &mut HashSet<String>,
+/// Instrumentation counters for subvariable-flow index construction and rewriting.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SubvarFlowStats {
+    pub index_builds: usize,
+    pub indexed_stmt_visits: usize,
+    pub indexed_use_queries: usize,
+    pub rewrite_passes: usize,
+    pub candidates_evaluated: usize,
+    pub candidates_applied: usize,
+}
+
+/// Deterministic helper collecting distinct variable names in `expr` in a single subtree pass.
+fn collect_distinct_vars_in_expr<'a>(
+    expr: &'a PreHirExpr,
+    out: &mut Vec<&'a str>,
+    seen: &mut HashSet<&'a str>,
 ) {
-    for stmt in stmts {
-        match stmt {
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::Var(name),
-                rhs,
-            } => {
-                if assigns.iter().any(|a| &a.lhs == name) {
-                    multi_def.insert(name.clone());
-                }
-                assigns.push(AssignInfo {
-                    lhs: name.clone(),
-                    rhs: rhs.clone(),
-                });
+    match expr {
+        PreHirExpr::Var(name) => {
+            if seen.insert(name.as_str()) {
+                out.push(name.as_str());
             }
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::Deref { ptr, .. },
-                rhs,
-            } => {
-                collect_expr_assigns(ptr, assigns, multi_def);
-                collect_expr_assigns(rhs, assigns, multi_def);
-            }
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::Index { base, index, .. },
-                rhs,
-            } => {
-                collect_expr_assigns(base, assigns, multi_def);
-                collect_expr_assigns(index, assigns, multi_def);
-                collect_expr_assigns(rhs, assigns, multi_def);
-            }
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::FieldAccess { base, .. },
-                rhs,
-            } => {
-                collect_expr_assigns(base, assigns, multi_def);
-                collect_expr_assigns(rhs, assigns, multi_def);
-            }
-            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-                collect_expr_assigns(expr, assigns, multi_def);
-            }
-            PreHirStmt::VaStart { va_list, .. } => {
-                collect_expr_assigns(va_list, assigns, multi_def);
-            }
-            PreHirStmt::Block(body)
-            | PreHirStmt::While { body, .. }
-            | PreHirStmt::DoWhile { body, .. } => {
-                collect_assignments(body, assigns, multi_def);
-            }
-            PreHirStmt::For {
-                init,
-                cond,
-                update,
-                body,
-            } => {
-                if let Some(i) = init {
-                    collect_assignments(std::slice::from_ref(i.as_ref()), assigns, multi_def);
-                }
-                if let Some(c) = cond {
-                    collect_expr_assigns(c, assigns, multi_def);
-                }
-                if let Some(u) = update {
-                    collect_assignments(std::slice::from_ref(u.as_ref()), assigns, multi_def);
-                }
-                collect_assignments(body, assigns, multi_def);
-            }
-            PreHirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                collect_expr_assigns(cond, assigns, multi_def);
-                collect_assignments(then_body, assigns, multi_def);
-                collect_assignments(else_body, assigns, multi_def);
-            }
-            PreHirStmt::Switch {
-                expr,
-                cases,
-                default,
-            } => {
-                collect_expr_assigns(expr, assigns, multi_def);
-                for case in cases {
-                    collect_assignments(&case.body, assigns, multi_def);
-                }
-                collect_assignments(default, assigns, multi_def);
-            }
-            _ => {}
         }
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
+            collect_distinct_vars_in_expr(expr, out, seen);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_distinct_vars_in_expr(lhs, out, seen);
+            collect_distinct_vars_in_expr(rhs, out, seen);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_distinct_vars_in_expr(arg, out, seen);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_distinct_vars_in_expr(base, out, seen);
+            collect_distinct_vars_in_expr(index, out, seen);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_distinct_vars_in_expr(cond, out, seen);
+            collect_distinct_vars_in_expr(then_expr, out, seen);
+            collect_distinct_vars_in_expr(else_expr, out, seen);
+        }
+        _ => {}
     }
 }
 
-fn collect_expr_assigns(
-    _expr: &PreHirExpr,
-    _assigns: &mut Vec<AssignInfo>,
-    _multi_def: &mut HashSet<String>,
-) {
-    // Inner expressions do not contain assignment statements in Fission's HIR.
+fn expr_var_set(expr: &PreHirExpr) -> Vec<String> {
+    let mut vars = Vec::new();
+    let mut seen = HashSet::default();
+    collect_distinct_vars_in_expr(expr, &mut vars, &mut seen);
+    vars.into_iter().map(str::to_string).collect()
+}
+
+/// Revision-local definition and contextual use-site index built in a single O(N + U) HIR pass.
+struct SubvarHirIndex {
+    assigns: Vec<AssignInfo>,
+    def_counts: HashMap<String, usize>,
+    def_map: HashMap<String, PreHirExpr>,
+    multi_defined: HashSet<String>,
+    uses_by_var: HashMap<String, Vec<UseInfo>>,
+    co_occurring_vars: HashMap<String, HashSet<String>>,
+    stmt_visits: usize,
+}
+
+impl SubvarHirIndex {
+    fn build(stmts: &[PreHirStmt]) -> Self {
+        let mut idx = Self {
+            assigns: Vec::new(),
+            def_counts: HashMap::default(),
+            def_map: HashMap::default(),
+            multi_defined: HashSet::default(),
+            uses_by_var: HashMap::default(),
+            co_occurring_vars: HashMap::default(),
+            stmt_visits: 0,
+        };
+        idx.visit_stmts(stmts, true);
+        for assign in &idx.assigns {
+            if !idx.multi_defined.contains(&assign.lhs) {
+                idx.def_map.insert(assign.lhs.clone(), assign.rhs.clone());
+            }
+        }
+        idx
+    }
+
+    fn rebuild_uses(&mut self, stmts: &[PreHirStmt]) {
+        self.uses_by_var.clear();
+        self.co_occurring_vars.clear();
+        self.stmt_visits = 0;
+        self.visit_stmts(stmts, false);
+    }
+
+    fn record_co_occurring(&mut self, vars: &[String]) {
+        if vars.len() <= 1 {
+            return;
+        }
+        for v in vars {
+            let entry = self.co_occurring_vars.entry(v.clone()).or_default();
+            for other in vars {
+                if other != v {
+                    entry.insert(other.clone());
+                }
+            }
+        }
+    }
+
+    fn push_use(&mut self, var_name: &str, context: UseContext) {
+        self.uses_by_var
+            .entry(var_name.to_string())
+            .or_default()
+            .push(UseInfo { context });
+    }
+
+    fn push_binary_operand_use(
+        &mut self,
+        var_name: &str,
+        op: PreHirBinaryOp,
+        left_var: bool,
+        right_var: bool,
+        other: &PreHirExpr,
+        dest: Option<&str>,
+    ) {
+        let _ = left_var;
+        match op {
+            PreHirBinaryOp::Eq
+            | PreHirBinaryOp::Ne
+            | PreHirBinaryOp::Lt
+            | PreHirBinaryOp::Le
+            | PreHirBinaryOp::Gt
+            | PreHirBinaryOp::Ge
+            | PreHirBinaryOp::SLt
+            | PreHirBinaryOp::SLe
+            | PreHirBinaryOp::SGt
+            | PreHirBinaryOp::SGe => {
+                self.push_use(
+                    var_name,
+                    UseContext::Compare {
+                        op,
+                        other: other.clone(),
+                    },
+                );
+            }
+            PreHirBinaryOp::And => {
+                if let (Some(d), PreHirExpr::Const(mask, _)) = (dest, other) {
+                    self.push_use(
+                        var_name,
+                        UseContext::AndMask {
+                            mask: *mask as u64,
+                            dest: d.to_string(),
+                        },
+                    );
+                } else if let Some(d) = dest {
+                    self.push_use(
+                        var_name,
+                        UseContext::Binary {
+                            op,
+                            other: other.clone(),
+                            dest: d.to_string(),
+                        },
+                    );
+                } else {
+                    self.push_use(var_name, UseContext::Incompatible);
+                }
+            }
+            PreHirBinaryOp::Add
+            | PreHirBinaryOp::Sub
+            | PreHirBinaryOp::Or
+            | PreHirBinaryOp::Xor
+            | PreHirBinaryOp::Shl
+            | PreHirBinaryOp::Shr
+            | PreHirBinaryOp::Sar => {
+                if let Some(d) = dest {
+                    if matches!(
+                        op,
+                        PreHirBinaryOp::Shl | PreHirBinaryOp::Shr | PreHirBinaryOp::Sar
+                    ) && right_var
+                    {
+                        self.push_use(
+                            var_name,
+                            UseContext::ShiftAmount {
+                                op,
+                                dest: d.to_string(),
+                            },
+                        );
+                    } else {
+                        self.push_use(
+                            var_name,
+                            UseContext::Binary {
+                                op,
+                                other: other.clone(),
+                                dest: d.to_string(),
+                            },
+                        );
+                    }
+                } else {
+                    self.push_use(var_name, UseContext::Incompatible);
+                }
+            }
+            _ => {
+                self.push_use(var_name, UseContext::Incompatible);
+            }
+        }
+    }
+
+    fn index_expr_use(
+        &mut self,
+        expr: &PreHirExpr,
+        dest: Option<&str>,
+        out_vars: &mut Vec<String>,
+    ) {
+        match expr {
+            PreHirExpr::Var(name) => {
+                out_vars.push(name.clone());
+                if let Some(d) = dest {
+                    self.push_use(
+                        name,
+                        UseContext::Binary {
+                            op: PreHirBinaryOp::And,
+                            other: PreHirExpr::Const(-1, NirType::Unknown),
+                            dest: d.to_string(),
+                        },
+                    );
+                } else {
+                    self.push_use(name, UseContext::Incompatible);
+                }
+            }
+            PreHirExpr::Binary { op, lhs, rhs, .. } => {
+                let left_name = match &**lhs {
+                    PreHirExpr::Var(name) => Some(name.as_str()),
+                    _ => None,
+                };
+                let right_name = match &**rhs {
+                    PreHirExpr::Var(name) => Some(name.as_str()),
+                    _ => None,
+                };
+
+                if let Some(lname) = left_name {
+                    let both_same = right_name == Some(lname);
+                    self.push_binary_operand_use(lname, *op, true, both_same, rhs, dest);
+                }
+                if let Some(rname) = right_name {
+                    if left_name != Some(rname) {
+                        self.push_binary_operand_use(rname, *op, false, true, lhs, dest);
+                    }
+                }
+
+                let vars = expr_var_set(expr);
+                for v in &vars {
+                    if left_name != Some(v.as_str()) && right_name != Some(v.as_str()) {
+                        self.push_use(v, UseContext::Incompatible);
+                    }
+                }
+                out_vars.extend(vars);
+            }
+            PreHirExpr::Cast { ty, expr: inner } => {
+                if let PreHirExpr::Var(name) = &**inner {
+                    out_vars.push(name.clone());
+                    if let Some(d) = dest {
+                        self.push_use(
+                            name,
+                            UseContext::Cast {
+                                target_ty: ty.clone(),
+                                dest: d.to_string(),
+                            },
+                        );
+                    } else {
+                        self.push_use(name, UseContext::Incompatible);
+                    }
+                    return;
+                }
+                let vars = expr_var_set(inner);
+                for v in &vars {
+                    self.push_use(v, UseContext::Incompatible);
+                }
+                out_vars.extend(vars);
+            }
+            PreHirExpr::Call { target, args, .. } => {
+                for (arg_idx, arg) in args.iter().enumerate() {
+                    if let PreHirExpr::Var(name) = arg {
+                        out_vars.push(name.clone());
+                        self.push_use(
+                            name,
+                            UseContext::Call {
+                                target: target.clone(),
+                                arg_idx,
+                            },
+                        );
+                        continue;
+                    }
+                    let vars = expr_var_set(arg);
+                    for v in &vars {
+                        self.push_use(v, UseContext::Incompatible);
+                    }
+                    out_vars.extend(vars);
+                }
+            }
+            _ => {
+                let vars = expr_var_set(expr);
+                for v in &vars {
+                    self.push_use(v, UseContext::Incompatible);
+                }
+                out_vars.extend(vars);
+            }
+        }
+    }
+
+    fn index_lvalue_use(&mut self, lhs: &PreHirLValue, out_vars: &mut Vec<String>) {
+        let vars = match lhs {
+            PreHirLValue::Var(_) => Vec::new(),
+            PreHirLValue::Deref { ptr, .. } => expr_var_set(ptr),
+            PreHirLValue::Index { base, index, .. } => {
+                let mut seen = HashSet::default();
+                let mut collected = Vec::new();
+                for v in expr_var_set(base).into_iter().chain(expr_var_set(index)) {
+                    if seen.insert(v.clone()) {
+                        collected.push(v);
+                    }
+                }
+                collected
+            }
+            PreHirLValue::FieldAccess { base, .. } => expr_var_set(base),
+        };
+        for v in &vars {
+            self.push_use(v, UseContext::Incompatible);
+        }
+        out_vars.extend(vars);
+    }
+
+    fn visit_stmts(&mut self, stmts: &[PreHirStmt], collect_defs: bool) {
+        for stmt in stmts {
+            self.stmt_visits += 1;
+            match stmt {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                } => {
+                    if collect_defs {
+                        let count = self.def_counts.entry(name.clone()).or_insert(0);
+                        *count += 1;
+                        if *count > 1 {
+                            self.multi_defined.insert(name.clone());
+                        }
+                        self.assigns.push(AssignInfo {
+                            lhs: name.clone(),
+                            rhs: rhs.clone(),
+                        });
+                    }
+                    let mut vars = vec![name.clone()];
+                    self.index_expr_use(rhs, Some(name), &mut vars);
+                    self.record_co_occurring(&vars);
+                }
+                PreHirStmt::Assign { lhs, rhs } => {
+                    let mut vars = Vec::new();
+                    self.index_lvalue_use(lhs, &mut vars);
+                    self.index_expr_use(rhs, None, &mut vars);
+                    self.record_co_occurring(&vars);
+                }
+                PreHirStmt::Expr(expr) => {
+                    let mut vars = Vec::new();
+                    self.index_expr_use(expr, None, &mut vars);
+                    self.record_co_occurring(&vars);
+                }
+                PreHirStmt::Return(Some(expr)) => {
+                    if let PreHirExpr::Var(name) = expr {
+                        self.push_use(name, UseContext::Return);
+                    } else {
+                        let vars = expr_var_set(expr);
+                        for v in &vars {
+                            self.push_use(v, UseContext::Incompatible);
+                        }
+                        self.record_co_occurring(&vars);
+                    }
+                }
+                PreHirStmt::Return(None) => {}
+                PreHirStmt::Block(body) => {
+                    self.visit_stmts(body, collect_defs);
+                }
+                PreHirStmt::While { cond, body } => {
+                    let mut vars = Vec::new();
+                    self.index_expr_use(cond, None, &mut vars);
+                    self.record_co_occurring(&vars);
+                    self.visit_stmts(body, collect_defs);
+                }
+                PreHirStmt::DoWhile { body, cond } => {
+                    self.visit_stmts(body, collect_defs);
+                    let mut vars = Vec::new();
+                    self.index_expr_use(cond, None, &mut vars);
+                    self.record_co_occurring(&vars);
+                }
+                PreHirStmt::For {
+                    init,
+                    cond,
+                    update,
+                    body,
+                } => {
+                    if let Some(i) = init {
+                        self.visit_stmts(std::slice::from_ref(i.as_ref()), collect_defs);
+                    }
+                    if let Some(c) = cond {
+                        let mut vars = Vec::new();
+                        self.index_expr_use(c, None, &mut vars);
+                        self.record_co_occurring(&vars);
+                    }
+                    if let Some(u) = update {
+                        self.visit_stmts(std::slice::from_ref(u.as_ref()), collect_defs);
+                    }
+                    self.visit_stmts(body, collect_defs);
+                }
+                PreHirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    let mut vars = Vec::new();
+                    self.index_expr_use(cond, None, &mut vars);
+                    self.record_co_occurring(&vars);
+                    self.visit_stmts(then_body, collect_defs);
+                    self.visit_stmts(else_body, collect_defs);
+                }
+                PreHirStmt::Switch {
+                    expr,
+                    cases,
+                    default,
+                } => {
+                    let mut vars = Vec::new();
+                    self.index_expr_use(expr, None, &mut vars);
+                    self.record_co_occurring(&vars);
+                    for case in cases {
+                        self.visit_stmts(&case.body, collect_defs);
+                    }
+                    self.visit_stmts(default, collect_defs);
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -181,298 +527,6 @@ enum UseContext {
     },
     Return,
     Incompatible,
-}
-
-/// Determines if an expression contains references to a variable.
-fn expr_contains_var(expr: &PreHirExpr, var_name: &str) -> bool {
-    match expr {
-        PreHirExpr::Var(name) => name == var_name,
-        PreHirExpr::Cast { expr, .. }
-        | PreHirExpr::Unary { expr, .. }
-        | PreHirExpr::Load { ptr: expr, .. }
-        | PreHirExpr::PtrOffset { base: expr, .. }
-        | PreHirExpr::AggregateCopy { src: expr, .. }
-        | PreHirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name)
-        }
-        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
-        PreHirExpr::Index { base, index, .. } => {
-            expr_contains_var(base, var_name) || expr_contains_var(index, var_name)
-        }
-        PreHirExpr::Select {
-            cond,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            expr_contains_var(cond, var_name)
-                || expr_contains_var(then_expr, var_name)
-                || expr_contains_var(else_expr, var_name)
-        }
-        _ => false,
-    }
-}
-
-/// Scans statement body recursively to find all usages and their contextual patterns for a given variable.
-fn find_uses(stmts: &[PreHirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
-    for stmt in stmts {
-        match stmt {
-            PreHirStmt::Assign {
-                lhs: PreHirLValue::Var(dest),
-                rhs,
-            } => {
-                analyze_expr_use(rhs, var_name, Some(dest), uses);
-            }
-            PreHirStmt::Assign { lhs, rhs } => {
-                analyze_lvalue_use(lhs, var_name, uses);
-                analyze_expr_use(rhs, var_name, None, uses);
-            }
-            PreHirStmt::Expr(expr) => {
-                analyze_expr_use(expr, var_name, None, uses);
-            }
-            PreHirStmt::Return(Some(expr)) => {
-                if expr_contains_var(expr, var_name) {
-                    if let PreHirExpr::Var(name) = expr {
-                        if name == var_name {
-                            uses.push(UseInfo {
-                                context: UseContext::Return,
-                            });
-                            continue;
-                        }
-                    }
-                    uses.push(UseInfo {
-                        context: UseContext::Incompatible,
-                    });
-                }
-            }
-            PreHirStmt::Return(None) => {}
-            PreHirStmt::Block(body) => {
-                find_uses(body, var_name, uses);
-            }
-            PreHirStmt::While { cond, body } => {
-                analyze_expr_use(cond, var_name, None, uses);
-                find_uses(body, var_name, uses);
-            }
-            PreHirStmt::DoWhile { body, cond } => {
-                find_uses(body, var_name, uses);
-                analyze_expr_use(cond, var_name, None, uses);
-            }
-            PreHirStmt::For {
-                init,
-                cond,
-                update,
-                body,
-            } => {
-                if let Some(i) = init {
-                    find_uses(std::slice::from_ref(i.as_ref()), var_name, uses);
-                }
-                if let Some(c) = cond {
-                    analyze_expr_use(c, var_name, None, uses);
-                }
-                if let Some(u) = update {
-                    find_uses(std::slice::from_ref(u.as_ref()), var_name, uses);
-                }
-                find_uses(body, var_name, uses);
-            }
-            PreHirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                analyze_expr_use(cond, var_name, None, uses);
-                find_uses(then_body, var_name, uses);
-                find_uses(else_body, var_name, uses);
-            }
-            PreHirStmt::Switch {
-                expr,
-                cases,
-                default,
-            } => {
-                analyze_expr_use(expr, var_name, None, uses);
-                for case in cases {
-                    find_uses(&case.body, var_name, uses);
-                }
-                find_uses(default, var_name, uses);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn analyze_expr_use(
-    expr: &PreHirExpr,
-    var_name: &str,
-    dest: Option<&str>,
-    uses: &mut Vec<UseInfo>,
-) {
-    if !expr_contains_var(expr, var_name) {
-        return;
-    }
-    match expr {
-        PreHirExpr::Var(name) => {
-            if name == var_name {
-                if let Some(d) = dest {
-                    uses.push(UseInfo {
-                        context: UseContext::Binary {
-                            op: PreHirBinaryOp::And,
-                            other: PreHirExpr::Const(-1, NirType::Unknown),
-                            dest: d.to_string(),
-                        },
-                    });
-                } else {
-                    uses.push(UseInfo {
-                        context: UseContext::Incompatible,
-                    });
-                }
-            }
-        }
-        PreHirExpr::Binary { op, lhs, rhs, .. } => {
-            let left_var = match &**lhs {
-                PreHirExpr::Var(name) => name == var_name,
-                _ => false,
-            };
-            let right_var = match &**rhs {
-                PreHirExpr::Var(name) => name == var_name,
-                _ => false,
-            };
-
-            if left_var || right_var {
-                let other = if left_var { &**rhs } else { &**lhs };
-                match op {
-                    PreHirBinaryOp::Eq
-                    | PreHirBinaryOp::Ne
-                    | PreHirBinaryOp::Lt
-                    | PreHirBinaryOp::Le
-                    | PreHirBinaryOp::Gt
-                    | PreHirBinaryOp::Ge
-                    | PreHirBinaryOp::SLt
-                    | PreHirBinaryOp::SLe
-                    | PreHirBinaryOp::SGt
-                    | PreHirBinaryOp::SGe => {
-                        uses.push(UseInfo {
-                            context: UseContext::Compare {
-                                op: *op,
-                                other: other.clone(),
-                            },
-                        });
-                    }
-                    PreHirBinaryOp::And => {
-                        if let (Some(d), PreHirExpr::Const(mask, _)) = (dest, other) {
-                            uses.push(UseInfo {
-                                context: UseContext::AndMask {
-                                    mask: *mask as u64,
-                                    dest: d.to_string(),
-                                },
-                            });
-                        } else if let Some(d) = dest {
-                            uses.push(UseInfo {
-                                context: UseContext::Binary {
-                                    op: *op,
-                                    other: other.clone(),
-                                    dest: d.to_string(),
-                                },
-                            });
-                        } else {
-                            uses.push(UseInfo {
-                                context: UseContext::Incompatible,
-                            });
-                        }
-                    }
-                    PreHirBinaryOp::Add
-                    | PreHirBinaryOp::Sub
-                    | PreHirBinaryOp::Or
-                    | PreHirBinaryOp::Xor
-                    | PreHirBinaryOp::Shl
-                    | PreHirBinaryOp::Shr
-                    | PreHirBinaryOp::Sar => {
-                        if let Some(d) = dest {
-                            if (*op == PreHirBinaryOp::Shl
-                                || *op == PreHirBinaryOp::Shr
-                                || *op == PreHirBinaryOp::Sar)
-                                && right_var
-                            {
-                                uses.push(UseInfo {
-                                    context: UseContext::ShiftAmount {
-                                        op: *op,
-                                        dest: d.to_string(),
-                                    },
-                                });
-                            } else {
-                                uses.push(UseInfo {
-                                    context: UseContext::Binary {
-                                        op: *op,
-                                        other: other.clone(),
-                                        dest: d.to_string(),
-                                    },
-                                });
-                            }
-                        } else {
-                            uses.push(UseInfo {
-                                context: UseContext::Incompatible,
-                            });
-                        }
-                    }
-                    _ => {
-                        uses.push(UseInfo {
-                            context: UseContext::Incompatible,
-                        });
-                    }
-                }
-            } else {
-                uses.push(UseInfo {
-                    context: UseContext::Incompatible,
-                });
-            }
-        }
-        PreHirExpr::Cast { ty, expr } => {
-            if let PreHirExpr::Var(name) = &**expr {
-                if name == var_name {
-                    if let Some(d) = dest {
-                        uses.push(UseInfo {
-                            context: UseContext::Cast {
-                                target_ty: ty.clone(),
-                                dest: d.to_string(),
-                            },
-                        });
-                    } else {
-                        uses.push(UseInfo {
-                            context: UseContext::Incompatible,
-                        });
-                    }
-                    return;
-                }
-            }
-            uses.push(UseInfo {
-                context: UseContext::Incompatible,
-            });
-        }
-        PreHirExpr::Call { target, args, .. } => {
-            for (idx, arg) in args.iter().enumerate() {
-                if let PreHirExpr::Var(name) = arg {
-                    if name == var_name {
-                        uses.push(UseInfo {
-                            context: UseContext::Call {
-                                target: target.clone(),
-                                arg_idx: idx,
-                            },
-                        });
-                        continue;
-                    }
-                }
-                if expr_contains_var(arg, var_name) {
-                    uses.push(UseInfo {
-                        context: UseContext::Incompatible,
-                    });
-                }
-            }
-        }
-        _ => {
-            uses.push(UseInfo {
-                context: UseContext::Incompatible,
-            });
-        }
-    }
 }
 
 /// RuleSubvarShift: trace SUBPIECE/CONCAT-style `Or` reassembly back to the source varnode.
@@ -550,48 +604,28 @@ fn trace_or_subvar_piece(lhs: &PreHirExpr, rhs: &PreHirExpr, mask: u64) -> Optio
     }
 }
 
-fn analyze_lvalue_use(lhs: &PreHirLValue, var_name: &str, uses: &mut Vec<UseInfo>) {
-    match lhs {
-        PreHirLValue::Var(_) => {}
-        PreHirLValue::Deref { ptr, .. } => {
-            if expr_contains_var(ptr, var_name) {
-                uses.push(UseInfo {
-                    context: UseContext::Incompatible,
-                });
-            }
-        }
-        PreHirLValue::Index { base, index, .. } => {
-            if expr_contains_var(base, var_name) || expr_contains_var(index, var_name) {
-                uses.push(UseInfo {
-                    context: UseContext::Incompatible,
-                });
-            }
-        }
-        PreHirLValue::FieldAccess { base, .. } => {
-            if expr_contains_var(base, var_name) {
-                uses.push(UseInfo {
-                    context: UseContext::Incompatible,
-                });
-            }
-        }
-    }
-}
-
 /// Global Subvariable Flow solver executing worklist bit constraint propagation backward and forward.
-struct SubvarFlowSolver {
-    def_map: HashMap<String, PreHirExpr>,
-    type_map: HashMap<String, NirType>,
-    multi_defined: HashSet<String>,
+struct SubvarFlowSolver<'a> {
+    def_map: &'a HashMap<String, PreHirExpr>,
+    type_map: &'a HashMap<String, NirType>,
+    multi_defined: &'a HashSet<String>,
     /// Bits each variable may hold nonzero (`compute_nz_masks`).
-    nz_masks: HashMap<String, u64>,
+    nz_masks: &'a HashMap<String, u64>,
     varmap: HashMap<String, ReplaceVar>,
     pull_points: HashSet<String>,
     worklist: Vec<(String, u64)>,
     pull_count: usize,
 }
 
-impl SubvarFlowSolver {
-    fn solve(&mut self, body: &[PreHirStmt]) -> bool {
+impl<'a> SubvarFlowSolver<'a> {
+    fn solve(
+        &mut self,
+        body: &mut Vec<PreHirStmt>,
+        index: &mut SubvarHirIndex,
+        pending_varmap: &mut HashMap<String, ReplaceVar>,
+        stale_vars: &mut HashSet<String>,
+        stats: &mut SubvarFlowStats,
+    ) -> bool {
         while let Some((var_name, mask)) = self.worklist.pop() {
             if let Some(existing) = self.varmap.get(&var_name) {
                 if existing.mask != mask {
@@ -634,7 +668,15 @@ impl SubvarFlowSolver {
                 return false;
             }
 
-            if !self.trace_forward(body, &var_name, mask) {
+            if !self.trace_forward(
+                body,
+                index,
+                pending_varmap,
+                stale_vars,
+                stats,
+                &var_name,
+                mask,
+            ) {
                 return false;
             }
         }
@@ -771,9 +813,38 @@ impl SubvarFlowSolver {
         }
     }
 
-    fn trace_forward(&mut self, body: &[PreHirStmt], var_name: &str, mask: u64) -> bool {
-        let mut uses = Vec::new();
-        find_uses(body, var_name, &mut uses);
+    fn trace_forward(
+        &mut self,
+        body: &mut [PreHirStmt],
+        index: &mut SubvarHirIndex,
+        pending_varmap: &mut HashMap<String, ReplaceVar>,
+        stale_vars: &mut HashSet<String>,
+        stats: &mut SubvarFlowStats,
+        var_name: &str,
+        mask: u64,
+    ) -> bool {
+        // A variable already mapped in `pending_varmap` has every occurrence in
+        // `func.body` renamed away by `rewrite_stmts`, so it has zero remaining
+        // uses in the rewritten HIR without needing an index rebuild.
+        let empty = Vec::new();
+        let uses = if pending_varmap.contains_key(var_name) {
+            stats.indexed_use_queries += 1;
+            empty
+        } else {
+            if stale_vars.contains(var_name) {
+                if !pending_varmap.is_empty() {
+                    rewrite_stmts(body, pending_varmap);
+                    stats.rewrite_passes += 1;
+                    pending_varmap.clear();
+                }
+                index.rebuild_uses(body);
+                stats.index_builds += 1;
+                stats.indexed_stmt_visits += index.stmt_visits;
+                stale_vars.clear();
+            }
+            stats.indexed_use_queries += 1;
+            index.uses_by_var.get(var_name).cloned().unwrap_or_default()
+        };
 
         for use_info in uses {
             match use_info.context {
@@ -1080,11 +1151,14 @@ fn rewrite_stmts(stmts: &mut [PreHirStmt], varmap: &HashMap<String, ReplaceVar>)
     }
 }
 
-/// Pipeline entry point for the Global Subvariable Flow Analyzer normalization pass.
-pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
-    let mut assigns = Vec::new();
-    let mut multi_defined = HashSet::default();
-    collect_assignments(&func.body, &mut assigns, &mut multi_defined);
+/// Pipeline entry point returning both change status and indexing/rewrite metrics.
+pub(crate) fn apply_subvar_flow_pass_with_stats(
+    func: &mut PreHirFunction,
+) -> (bool, SubvarFlowStats) {
+    let mut stats = SubvarFlowStats::default();
+    let mut index = SubvarHirIndex::build(&func.body);
+    stats.index_builds = 1;
+    stats.indexed_stmt_visits = index.stmt_visits;
 
     let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
@@ -1094,8 +1168,8 @@ pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
     let nz_masks = crate::global_opt::compute_nz_masks(func);
     let mut candidate_set = HashSet::default();
 
-    for assign in &assigns {
-        if multi_defined.contains(&assign.lhs) {
+    for assign in &index.assigns {
+        if index.multi_defined.contains(&assign.lhs) {
             continue;
         }
         match &assign.rhs {
@@ -1144,35 +1218,46 @@ pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
         }
     }
 
-    let candidates: Vec<(String, u64)> = candidate_set.into_iter().collect();
+    let mut candidates: Vec<(String, u64)> = candidate_set.into_iter().collect();
+    candidates.sort();
 
     if candidates.is_empty() {
-        return false;
+        return (false, stats);
     }
 
-    let mut def_map = HashMap::default();
-    for assign in assigns {
-        if !multi_defined.contains(&assign.lhs) {
-            def_map.insert(assign.lhs, assign.rhs);
-        }
-    }
-
+    let def_map = std::mem::take(&mut index.def_map);
+    let multi_defined = std::mem::take(&mut index.multi_defined);
+    let mut local_names: HashSet<String> = func.locals.iter().map(|l| l.name.clone()).collect();
+    let mut pending_varmap: HashMap<String, ReplaceVar> = HashMap::default();
+    let mut stale_vars: HashSet<String> = HashSet::default();
     let mut changed = false;
+
     for (var_name, mask) in candidates {
+        stats.candidates_evaluated += 1;
         let mut solver = SubvarFlowSolver {
-            def_map: def_map.clone(),
-            type_map: type_map.clone(),
-            multi_defined: multi_defined.clone(),
-            nz_masks: nz_masks.clone(),
+            def_map: &def_map,
+            type_map: &type_map,
+            multi_defined: &multi_defined,
+            nz_masks: &nz_masks,
             varmap: HashMap::default(),
             pull_points: HashSet::default(),
-            worklist: vec![(var_name.clone(), mask)],
+            worklist: vec![(var_name, mask)],
             pull_count: 0,
         };
 
-        if solver.solve(&func.body) {
-            for replace_var in solver.varmap.values() {
-                if !func.locals.iter().any(|l| l.name == replace_var.new_name) {
+        if solver.solve(
+            &mut func.body,
+            &mut index,
+            &mut pending_varmap,
+            &mut stale_vars,
+            &mut stats,
+        ) {
+            stats.candidates_applied += 1;
+            let mut sorted_replacements: Vec<(&String, &ReplaceVar)> =
+                solver.varmap.iter().collect();
+            sorted_replacements.sort_by(|(a, _), (b, _)| a.cmp(b));
+            for (_, replace_var) in sorted_replacements {
+                if local_names.insert(replace_var.new_name.clone()) {
                     // A leaf nothing in the body assigns (a formal, typically) is
                     // read through the new name, so the new name must be given its
                     // value: the low bits of the original. Without this the
@@ -1192,11 +1277,44 @@ pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
                 }
             }
 
-            rewrite_stmts(&mut func.body, &solver.varmap);
+            // If this solution collides with buffered rewrites in `pending_varmap`, flush
+            // buffered rewrites first before merging, then mark only affected co-occurring
+            // variables stale so independent components require zero index rebuilds.
+            let conflicts_with_pending =
+                solver.varmap.keys().any(|k| pending_varmap.contains_key(k));
+            if conflicts_with_pending && !pending_varmap.is_empty() {
+                rewrite_stmts(&mut func.body, &pending_varmap);
+                stats.rewrite_passes += 1;
+                pending_varmap.clear();
+                index.rebuild_uses(&func.body);
+                stats.index_builds += 1;
+                stats.indexed_stmt_visits += index.stmt_visits;
+                stale_vars.clear();
+            }
+
+            for (orig, rep) in solver.varmap {
+                stale_vars.insert(orig.clone());
+                stale_vars.insert(rep.new_name.clone());
+                if let Some(neighbors) = index.co_occurring_vars.get(&orig) {
+                    stale_vars.extend(neighbors.iter().cloned());
+                }
+                pending_varmap.insert(orig, rep);
+            }
             changed = true;
         }
     }
-    changed
+
+    if !pending_varmap.is_empty() {
+        rewrite_stmts(&mut func.body, &pending_varmap);
+        stats.rewrite_passes += 1;
+    }
+
+    (changed, stats)
+}
+
+/// Pipeline entry point for the Global Subvariable Flow Analyzer normalization pass.
+pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
+    apply_subvar_flow_pass_with_stats(func).0
 }
 
 #[cfg(test)]
@@ -1580,19 +1698,25 @@ mod tests {
     #[test]
     fn subvar_flow_carry_ops_reject_a_mask_that_skips_bit_zero() {
         let var = |n: &str| Box::new(PreHirExpr::Var(n.to_string()));
-        let solver = |rhs: PreHirExpr| SubvarFlowSolver {
-            def_map: HashMap::from_iter([("x".to_string(), rhs)]),
-            type_map: HashMap::from_iter([
-                ("a".to_string(), u64_ty()),
-                ("b".to_string(), u64_ty()),
-                ("x".to_string(), u64_ty()),
-            ]),
-            multi_defined: HashSet::default(),
-            nz_masks: HashMap::default(),
-            varmap: HashMap::default(),
-            pull_points: HashSet::default(),
-            worklist: Vec::new(),
-            pull_count: 0,
+        let type_map = HashMap::from_iter([
+            ("a".to_string(), u64_ty()),
+            ("b".to_string(), u64_ty()),
+            ("x".to_string(), u64_ty()),
+        ]);
+        let multi_defined = HashSet::default();
+        let nz_masks = HashMap::default();
+        let check_back = |def_map: &HashMap<String, PreHirExpr>, mask: u64| {
+            SubvarFlowSolver {
+                def_map,
+                type_map: &type_map,
+                multi_defined: &multi_defined,
+                nz_masks: &nz_masks,
+                varmap: HashMap::default(),
+                pull_points: HashSet::default(),
+                worklist: Vec::new(),
+                pull_count: 0,
+            }
+            .trace_backward("x", mask)
         };
         let binary = |op| PreHirExpr::Binary {
             op,
@@ -1601,17 +1725,857 @@ mod tests {
             ty: u64_ty(),
         };
         for op in [PreHirBinaryOp::Add, PreHirBinaryOp::Sub] {
-            assert!(!solver(binary(op)).trace_backward("x", 0xff00), "{op:?}");
-            assert!(solver(binary(op)).trace_backward("x", 0xff), "{op:?}");
+            let def_map = HashMap::from_iter([("x".to_string(), binary(op))]);
+            assert!(!check_back(&def_map, 0xff00), "{op:?}");
+            assert!(check_back(&def_map, 0xff), "{op:?}");
         }
         let neg = PreHirExpr::Unary {
             op: PreHirUnaryOp::Neg,
             expr: var("a"),
             ty: u64_ty(),
         };
-        assert!(!solver(neg.clone()).trace_backward("x", 0xff00));
-        assert!(solver(neg).trace_backward("x", 0xff));
+        let neg_map = HashMap::from_iter([("x".to_string(), neg)]);
+        assert!(!check_back(&neg_map, 0xff00));
+        assert!(check_back(&neg_map, 0xff));
         // Bitwise ops have no carry: any slice is fine.
-        assert!(solver(binary(PreHirBinaryOp::Xor)).trace_backward("x", 0xff00));
+        let xor_map = HashMap::from_iter([("x".to_string(), binary(PreHirBinaryOp::Xor))]);
+        assert!(check_back(&xor_map, 0xff00));
+    }
+
+    // --- Legacy O(N^2) / whole-tree reference implementation for differential validation ---
+
+    fn legacy_collect_assignments(
+        stmts: &[PreHirStmt],
+        assigns: &mut Vec<AssignInfo>,
+        multi_def: &mut HashSet<String>,
+    ) {
+        for stmt in stmts {
+            match stmt {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                } => {
+                    if assigns.iter().any(|a| &a.lhs == name) {
+                        multi_def.insert(name.clone());
+                    }
+                    assigns.push(AssignInfo {
+                        lhs: name.clone(),
+                        rhs: rhs.clone(),
+                    });
+                }
+                PreHirStmt::Block(body)
+                | PreHirStmt::While { body, .. }
+                | PreHirStmt::DoWhile { body, .. } => {
+                    legacy_collect_assignments(body, assigns, multi_def);
+                }
+                PreHirStmt::For {
+                    init, update, body, ..
+                } => {
+                    if let Some(i) = init {
+                        legacy_collect_assignments(
+                            std::slice::from_ref(i.as_ref()),
+                            assigns,
+                            multi_def,
+                        );
+                    }
+                    if let Some(u) = update {
+                        legacy_collect_assignments(
+                            std::slice::from_ref(u.as_ref()),
+                            assigns,
+                            multi_def,
+                        );
+                    }
+                    legacy_collect_assignments(body, assigns, multi_def);
+                }
+                PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    legacy_collect_assignments(then_body, assigns, multi_def);
+                    legacy_collect_assignments(else_body, assigns, multi_def);
+                }
+                PreHirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        legacy_collect_assignments(&case.body, assigns, multi_def);
+                    }
+                    legacy_collect_assignments(default, assigns, multi_def);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn legacy_expr_contains_var(expr: &PreHirExpr, var_name: &str, visits: &mut usize) -> bool {
+        *visits += 1;
+        match expr {
+            PreHirExpr::Var(name) => name == var_name,
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => {
+                legacy_expr_contains_var(expr, var_name, visits)
+            }
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                legacy_expr_contains_var(lhs, var_name, visits)
+                    || legacy_expr_contains_var(rhs, var_name, visits)
+            }
+            PreHirExpr::Call { args, .. } => args
+                .iter()
+                .any(|arg| legacy_expr_contains_var(arg, var_name, visits)),
+            PreHirExpr::Index { base, index, .. } => {
+                legacy_expr_contains_var(base, var_name, visits)
+                    || legacy_expr_contains_var(index, var_name, visits)
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                legacy_expr_contains_var(cond, var_name, visits)
+                    || legacy_expr_contains_var(then_expr, var_name, visits)
+                    || legacy_expr_contains_var(else_expr, var_name, visits)
+            }
+            _ => false,
+        }
+    }
+
+    fn legacy_find_uses(
+        stmts: &[PreHirStmt],
+        var_name: &str,
+        uses: &mut Vec<UseInfo>,
+        stmt_scans: &mut usize,
+        expr_visits: &mut usize,
+    ) {
+        for stmt in stmts {
+            *stmt_scans += 1;
+            match stmt {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(dest),
+                    rhs,
+                } => legacy_analyze_expr_use(rhs, var_name, Some(dest), uses, expr_visits),
+                PreHirStmt::Assign { lhs, rhs } => {
+                    match lhs {
+                        PreHirLValue::Var(_) => {}
+                        PreHirLValue::Deref { ptr, .. } => {
+                            if legacy_expr_contains_var(ptr, var_name, expr_visits) {
+                                uses.push(UseInfo {
+                                    context: UseContext::Incompatible,
+                                });
+                            }
+                        }
+                        PreHirLValue::Index { base, index, .. } => {
+                            if legacy_expr_contains_var(base, var_name, expr_visits)
+                                || legacy_expr_contains_var(index, var_name, expr_visits)
+                            {
+                                uses.push(UseInfo {
+                                    context: UseContext::Incompatible,
+                                });
+                            }
+                        }
+                        PreHirLValue::FieldAccess { base, .. } => {
+                            if legacy_expr_contains_var(base, var_name, expr_visits) {
+                                uses.push(UseInfo {
+                                    context: UseContext::Incompatible,
+                                });
+                            }
+                        }
+                    }
+                    legacy_analyze_expr_use(rhs, var_name, None, uses, expr_visits);
+                }
+                PreHirStmt::Expr(expr) => {
+                    legacy_analyze_expr_use(expr, var_name, None, uses, expr_visits)
+                }
+                PreHirStmt::Return(Some(expr)) => {
+                    if legacy_expr_contains_var(expr, var_name, expr_visits) {
+                        if let PreHirExpr::Var(name) = expr {
+                            if name == var_name {
+                                uses.push(UseInfo {
+                                    context: UseContext::Return,
+                                });
+                                continue;
+                            }
+                        }
+                        uses.push(UseInfo {
+                            context: UseContext::Incompatible,
+                        });
+                    }
+                }
+                PreHirStmt::Block(body) => {
+                    legacy_find_uses(body, var_name, uses, stmt_scans, expr_visits)
+                }
+                PreHirStmt::While { cond, body } => {
+                    legacy_analyze_expr_use(cond, var_name, None, uses, expr_visits);
+                    legacy_find_uses(body, var_name, uses, stmt_scans, expr_visits);
+                }
+                PreHirStmt::DoWhile { body, cond } => {
+                    legacy_find_uses(body, var_name, uses, stmt_scans, expr_visits);
+                    legacy_analyze_expr_use(cond, var_name, None, uses, expr_visits);
+                }
+                PreHirStmt::For {
+                    init,
+                    cond,
+                    update,
+                    body,
+                } => {
+                    if let Some(i) = init {
+                        legacy_find_uses(
+                            std::slice::from_ref(i.as_ref()),
+                            var_name,
+                            uses,
+                            stmt_scans,
+                            expr_visits,
+                        );
+                    }
+                    if let Some(c) = cond {
+                        legacy_analyze_expr_use(c, var_name, None, uses, expr_visits);
+                    }
+                    if let Some(u) = update {
+                        legacy_find_uses(
+                            std::slice::from_ref(u.as_ref()),
+                            var_name,
+                            uses,
+                            stmt_scans,
+                            expr_visits,
+                        );
+                    }
+                    legacy_find_uses(body, var_name, uses, stmt_scans, expr_visits);
+                }
+                PreHirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    legacy_analyze_expr_use(cond, var_name, None, uses, expr_visits);
+                    legacy_find_uses(then_body, var_name, uses, stmt_scans, expr_visits);
+                    legacy_find_uses(else_body, var_name, uses, stmt_scans, expr_visits);
+                }
+                PreHirStmt::Switch {
+                    expr,
+                    cases,
+                    default,
+                } => {
+                    legacy_analyze_expr_use(expr, var_name, None, uses, expr_visits);
+                    for case in cases {
+                        legacy_find_uses(&case.body, var_name, uses, stmt_scans, expr_visits);
+                    }
+                    legacy_find_uses(default, var_name, uses, stmt_scans, expr_visits);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn legacy_analyze_expr_use(
+        expr: &PreHirExpr,
+        var_name: &str,
+        dest: Option<&str>,
+        uses: &mut Vec<UseInfo>,
+        expr_visits: &mut usize,
+    ) {
+        if !legacy_expr_contains_var(expr, var_name, expr_visits) {
+            return;
+        }
+        match expr {
+            PreHirExpr::Var(name) if name == var_name => {
+                if let Some(d) = dest {
+                    uses.push(UseInfo {
+                        context: UseContext::Binary {
+                            op: PreHirBinaryOp::And,
+                            other: PreHirExpr::Const(-1, NirType::Unknown),
+                            dest: d.to_string(),
+                        },
+                    });
+                } else {
+                    uses.push(UseInfo {
+                        context: UseContext::Incompatible,
+                    });
+                }
+            }
+            PreHirExpr::Binary { op, lhs, rhs, .. } => {
+                let left_var = matches!(&**lhs, PreHirExpr::Var(name) if name == var_name);
+                let right_var = matches!(&**rhs, PreHirExpr::Var(name) if name == var_name);
+                if left_var || right_var {
+                    let other = if left_var { &**rhs } else { &**lhs };
+                    let mut dummy = SubvarHirIndex {
+                        assigns: Vec::new(),
+                        def_counts: HashMap::default(),
+                        def_map: HashMap::default(),
+                        multi_defined: HashSet::default(),
+                        uses_by_var: HashMap::default(),
+                        co_occurring_vars: HashMap::default(),
+                        stmt_visits: 0,
+                    };
+                    dummy.push_binary_operand_use(var_name, *op, left_var, right_var, other, dest);
+                    if let Some(u) = dummy.uses_by_var.remove(var_name) {
+                        uses.extend(u);
+                    }
+                } else {
+                    uses.push(UseInfo {
+                        context: UseContext::Incompatible,
+                    });
+                }
+            }
+            PreHirExpr::Cast { ty, expr } => {
+                if let PreHirExpr::Var(name) = &**expr {
+                    if name == var_name {
+                        if let Some(d) = dest {
+                            uses.push(UseInfo {
+                                context: UseContext::Cast {
+                                    target_ty: ty.clone(),
+                                    dest: d.to_string(),
+                                },
+                            });
+                        } else {
+                            uses.push(UseInfo {
+                                context: UseContext::Incompatible,
+                            });
+                        }
+                        return;
+                    }
+                }
+                uses.push(UseInfo {
+                    context: UseContext::Incompatible,
+                });
+            }
+            PreHirExpr::Call { target, args, .. } => {
+                for (idx, arg) in args.iter().enumerate() {
+                    if let PreHirExpr::Var(name) = arg {
+                        if name == var_name {
+                            uses.push(UseInfo {
+                                context: UseContext::Call {
+                                    target: target.clone(),
+                                    arg_idx: idx,
+                                },
+                            });
+                            continue;
+                        }
+                    }
+                    if legacy_expr_contains_var(arg, var_name, expr_visits) {
+                        uses.push(UseInfo {
+                            context: UseContext::Incompatible,
+                        });
+                    }
+                }
+            }
+            _ => uses.push(UseInfo {
+                context: UseContext::Incompatible,
+            }),
+        }
+    }
+
+    fn legacy_apply_subvar_flow_pass(func: &mut PreHirFunction) -> (bool, usize, usize) {
+        let mut assigns = Vec::new();
+        let mut multi_defined = HashSet::default();
+        legacy_collect_assignments(&func.body, &mut assigns, &mut multi_defined);
+
+        let mut type_map = HashMap::default();
+        for binding in func.params.iter().chain(func.locals.iter()) {
+            type_map.insert(binding.name.clone(), binding.ty.clone());
+        }
+        let nz_masks = crate::global_opt::compute_nz_masks(func);
+        let mut candidate_set = HashSet::default();
+        for assign in &assigns {
+            if multi_defined.contains(&assign.lhs) {
+                continue;
+            }
+            match &assign.rhs {
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
+                    lhs,
+                    rhs,
+                    ..
+                } => {
+                    if let (PreHirExpr::Var(name), PreHirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
+                        if is_valid_subvar_mask(*mask as u64) {
+                            candidate_set.insert((name.clone(), *mask as u64));
+                        }
+                    }
+                    if let (PreHirExpr::Const(mask, _), PreHirExpr::Var(name)) = (&**lhs, &**rhs) {
+                        if is_valid_subvar_mask(*mask as u64) {
+                            candidate_set.insert((name.clone(), *mask as u64));
+                        }
+                    }
+                }
+                PreHirExpr::Cast { ty, expr } => {
+                    if let PreHirExpr::Var(name) = &**expr {
+                        if let NirType::Int { bits, .. } = ty {
+                            if *bits == 8 || *bits == 16 || *bits == 32 {
+                                candidate_set.insert((name.clone(), (1u64 << bits) - 1));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (name, mask) in &nz_masks {
+            if is_valid_subvar_mask(*mask) {
+                if let Some(NirType::Int { bits: w, .. }) = type_map.get(name) {
+                    if let Some((bitsize, _)) = compute_sizes(*mask) {
+                        if *w > bitsize {
+                            candidate_set.insert((name.clone(), *mask));
+                        }
+                    }
+                }
+            }
+        }
+        let mut candidates: Vec<(String, u64)> = candidate_set.into_iter().collect();
+        candidates.sort();
+        if candidates.is_empty() {
+            return (false, 0, 0);
+        }
+        let mut def_map = HashMap::default();
+        for assign in assigns {
+            if !multi_defined.contains(&assign.lhs) {
+                def_map.insert(assign.lhs, assign.rhs);
+            }
+        }
+        let mut changed = false;
+        let mut total_stmt_scans = 0usize;
+        let mut total_expr_visits = 0usize;
+        for (var_name, mask) in candidates {
+            let mut solver = SubvarFlowSolver {
+                def_map: &def_map,
+                type_map: &type_map,
+                multi_defined: &multi_defined,
+                nz_masks: &nz_masks,
+                varmap: HashMap::default(),
+                pull_points: HashSet::default(),
+                worklist: vec![(var_name, mask)],
+                pull_count: 0,
+            };
+            let ok = {
+                let mut ok = true;
+                while let Some((vn, m)) = solver.worklist.pop() {
+                    if let Some(ex) = solver.varmap.get(&vn) {
+                        if ex.mask != m {
+                            ok = false;
+                            break;
+                        }
+                        continue;
+                    }
+                    let Some((bitsize, _)) = compute_sizes(m) else {
+                        ok = false;
+                        break;
+                    };
+                    let is_signed = matches!(
+                        solver.type_map.get(&vn),
+                        Some(NirType::Int { signed: true, .. })
+                    );
+                    let new_name = format!("{vn}_sub{bitsize}");
+                    solver.varmap.insert(
+                        vn.clone(),
+                        ReplaceVar {
+                            original_name: vn.clone(),
+                            mask: m,
+                            bitsize,
+                            new_name,
+                            new_type: NirType::Int {
+                                bits: bitsize,
+                                signed: is_signed,
+                            },
+                        },
+                    );
+                    if !solver.trace_backward(&vn, m) {
+                        ok = false;
+                        break;
+                    }
+                    let mut uses = Vec::new();
+                    legacy_find_uses(
+                        &func.body,
+                        &vn,
+                        &mut uses,
+                        &mut total_stmt_scans,
+                        &mut total_expr_visits,
+                    );
+                    for u in uses {
+                        match u.context {
+                            UseContext::AndMask { mask: mm, dest } => {
+                                if mm == m {
+                                    solver.pull_points.insert(dest.clone());
+                                    solver.pull_count += 1;
+                                    if let Some(rep) = solver.varmap.get(&vn).cloned() {
+                                        solver.varmap.insert(dest, rep);
+                                    }
+                                } else {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            UseContext::Cast { target_ty, dest } => {
+                                if (m & 1) == 0 {
+                                    ok = false;
+                                    break;
+                                }
+                                let bits = match target_ty {
+                                    NirType::Int { bits, .. } => bits,
+                                    NirType::Bool => 1,
+                                    _ => {
+                                        ok = false;
+                                        break;
+                                    }
+                                };
+                                if compute_sizes(m).is_some_and(|(bs, _)| bs == bits) {
+                                    solver.pull_points.insert(dest.clone());
+                                    solver.pull_count += 1;
+                                    if let Some(rep) = solver.varmap.get(&vn).cloned() {
+                                        solver.varmap.insert(dest, rep);
+                                    }
+                                } else {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            UseContext::Binary { op, other, dest } => match op {
+                                PreHirBinaryOp::Add | PreHirBinaryOp::Sub => {
+                                    if (m & 1) == 0 {
+                                        ok = false;
+                                        break;
+                                    }
+                                    solver.worklist.push((dest.clone(), m));
+                                    if let PreHirExpr::Var(o) = other {
+                                        solver.worklist.push((o, m));
+                                    }
+                                }
+                                PreHirBinaryOp::And | PreHirBinaryOp::Or | PreHirBinaryOp::Xor => {
+                                    solver.worklist.push((dest.clone(), m));
+                                    if let PreHirExpr::Var(o) = other {
+                                        solver.worklist.push((o, m));
+                                    }
+                                }
+                                _ => {
+                                    ok = false;
+                                    break;
+                                }
+                            },
+                            UseContext::Compare { op, other } => {
+                                let upper_bits_zero =
+                                    solver.nz_masks.get(&vn).is_some_and(|nz| nz & !m == 0);
+                                let signed = matches!(
+                                    solver.type_map.get(&vn),
+                                    Some(NirType::Int { signed: true, .. })
+                                );
+                                if !matches!(op, PreHirBinaryOp::Eq | PreHirBinaryOp::Ne)
+                                    || !upper_bits_zero
+                                    || signed
+                                    || (m & 1) == 0
+                                {
+                                    ok = false;
+                                    break;
+                                }
+                                match other {
+                                    PreHirExpr::Const(val, _) => {
+                                        if (val as u64 & !m) != 0 {
+                                            ok = false;
+                                            break;
+                                        }
+                                    }
+                                    PreHirExpr::Var(o) => solver.worklist.push((o, m)),
+                                    _ => {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                solver.pull_count += 1;
+                            }
+                            _ => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                }
+                ok && solver.pull_count > 0
+            };
+            if ok {
+                let mut sorted_replacements: Vec<(&String, &ReplaceVar)> =
+                    solver.varmap.iter().collect();
+                sorted_replacements.sort_by(|(a, _), (b, _)| a.cmp(b));
+                for (_, rep) in sorted_replacements {
+                    if !func.locals.iter().any(|l| l.name == rep.new_name) {
+                        let leaf = !def_map.contains_key(&rep.original_name);
+                        func.locals.push(PreHirBinding {
+                            name: rep.new_name.clone(),
+                            ty: rep.new_type.clone(),
+                            surface_type_name: None,
+                            origin: Some(NirBindingOrigin::Temp),
+                            initializer: leaf.then(|| PreHirExpr::Cast {
+                                ty: rep.new_type.clone(),
+                                expr: Box::new(PreHirExpr::Var(rep.original_name.clone())),
+                            }),
+                        });
+                    }
+                }
+                rewrite_stmts(&mut func.body, &solver.varmap);
+                changed = true;
+            }
+        }
+        (changed, total_stmt_scans, total_expr_visits)
+    }
+
+    #[test]
+    fn indexed_pass_matches_legacy_reference_on_multidef_nested_and_edge_cases() {
+        let b = |name: &str, origin| PreHirBinding {
+            name: name.to_string(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+        let mut func = PreHirFunction {
+            name: "mixed_edges".to_string(),
+            params: vec![
+                b("p0", NirBindingOrigin::ParamIndex(0)),
+                b("p1", NirBindingOrigin::ParamIndex(1)),
+                b("q0", NirBindingOrigin::ParamIndex(2)),
+                b("q1", NirBindingOrigin::ParamIndex(3)),
+            ],
+            locals: vec![
+                b("m", NirBindingOrigin::Temp),
+                b("a", NirBindingOrigin::Temp),
+                b("y", NirBindingOrigin::Temp),
+                b("z", NirBindingOrigin::Temp),
+                b("c1", NirBindingOrigin::Temp),
+                b("c2", NirBindingOrigin::Temp),
+                b("r", NirBindingOrigin::Temp),
+            ],
+            body: vec![
+                // Multi-def variable `m` must be rejected cleanly
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("m".into()),
+                    rhs: PreHirExpr::Var("p0".into()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("m".into()),
+                    rhs: PreHirExpr::Var("p1".into()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("m".into())),
+                        rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                        ty: u64_ty(),
+                    },
+                },
+                // Valid narrowing chain (`a -> c1 -> c2`) alongside an `If` branch containing
+                // nested binary/call/return expressions over unrelated local `r`.
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("a".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Xor,
+                        lhs: Box::new(PreHirExpr::Var("q0".into())),
+                        rhs: Box::new(PreHirExpr::Var("q1".into())),
+                        ty: u64_ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("c1".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("a".into())),
+                        rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                        ty: u64_ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("c2".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
+                        lhs: Box::new(PreHirExpr::Var("c1".into())),
+                        rhs: Box::new(PreHirExpr::Const(5, u64_ty())),
+                        ty: NirType::Bool,
+                    },
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Gt,
+                        lhs: Box::new(PreHirExpr::Var("r".into())),
+                        rhs: Box::new(PreHirExpr::Const(0, u64_ty())),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                        target: "sink".into(),
+                        args: vec![PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("r".into())),
+                            rhs: Box::new(PreHirExpr::Const(1, u64_ty())),
+                            ty: u64_ty(),
+                        }],
+                        ty: NirType::Unknown,
+                        origin: None,
+                    })]
+                    .into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("r".into()))),
+            ],
+            ..Default::default()
+        };
+
+        let mut legacy_func = func.clone();
+        let (legacy_changed, _, _) = legacy_apply_subvar_flow_pass(&mut legacy_func);
+        let (indexed_changed, stats) = apply_subvar_flow_pass_with_stats(&mut func);
+
+        assert_eq!(indexed_changed, legacy_changed);
+        assert!(indexed_changed);
+        assert_eq!(
+            format!("{:?}", func.locals),
+            format!("{:?}", legacy_func.locals)
+        );
+        assert_eq!(
+            format!("{:?}", func.body),
+            format!("{:?}", legacy_func.body)
+        );
+        assert!(stats.indexed_use_queries > 0);
+    }
+
+    #[test]
+    fn scaling_doubling_independent_assignments_and_copy_chains() {
+        let b = |name: &str, origin| PreHirBinding {
+            name: name.to_string(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+
+        // 1. Doubling-size independent assignments: (y_i = x_i & 0xff; z_i = y_i == 1)
+        for n in [64usize, 128, 256, 512, 1024] {
+            let mut params = Vec::with_capacity(n);
+            let mut locals = Vec::with_capacity(2 * n);
+            let mut body = Vec::with_capacity(2 * n);
+            for i in 0..n {
+                params.push(b(&format!("x_{i}"), NirBindingOrigin::ParamIndex(i)));
+                locals.push(b(&format!("y_{i}"), NirBindingOrigin::Temp));
+                locals.push(b(&format!("z_{i}"), NirBindingOrigin::Temp));
+                body.push(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(format!("y_{i}")),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var(format!("x_{i}"))),
+                        rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                        ty: u64_ty(),
+                    },
+                });
+                body.push(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(format!("z_{i}")),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
+                        lhs: Box::new(PreHirExpr::Var(format!("y_{i}"))),
+                        rhs: Box::new(PreHirExpr::Const(1, u64_ty())),
+                        ty: NirType::Bool,
+                    },
+                });
+            }
+            let base = PreHirFunction {
+                name: format!("indep_{n}"),
+                params,
+                locals,
+                body,
+                ..Default::default()
+            };
+
+            let mut indexed_func = base.clone();
+            let t0 = std::time::Instant::now();
+            let (changed, stats) = apply_subvar_flow_pass_with_stats(&mut indexed_func);
+            let indexed_us = t0.elapsed().as_micros();
+            assert!(changed);
+            assert_eq!(stats.index_builds, 1);
+            assert_eq!(stats.rewrite_passes, 1);
+            assert_eq!(stats.indexed_stmt_visits, 2 * n);
+
+            let legacy_note = if n <= 256 {
+                let mut legacy_func = base;
+                let t1 = std::time::Instant::now();
+                let (l_changed, stmt_scans, _) = legacy_apply_subvar_flow_pass(&mut legacy_func);
+                let legacy_us = t1.elapsed().as_micros();
+                assert_eq!(changed, l_changed);
+                assert_eq!(
+                    format!("{:?}", indexed_func.body),
+                    format!("{:?}", legacy_func.body)
+                );
+                format!("legacy_us={legacy_us} legacy_stmt_scans={stmt_scans}")
+            } else {
+                "legacy=skipped".to_string()
+            };
+            eprintln!(
+                "subvar_flow independent N={n}: indexed_us={indexed_us} stmt_visits={} builds={} rewrites={} | {legacy_note}",
+                stats.indexed_stmt_visits, stats.index_builds, stats.rewrite_passes
+            );
+        }
+
+        // 2. Doubling-size copy chains: v_1 = p0; v_2 = v_1; ...; y = v_L & 0xff; z = y == 1
+        for len in [32usize, 64, 128, 256, 512] {
+            let mut locals = Vec::with_capacity(len + 2);
+            let mut body = Vec::with_capacity(len + 2);
+            let mut prev = "p0".to_string();
+            for i in 1..=len {
+                let cur = format!("v_{i}");
+                locals.push(b(&cur, NirBindingOrigin::Temp));
+                body.push(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(cur.clone()),
+                    rhs: PreHirExpr::Var(prev),
+                });
+                prev = cur;
+            }
+            locals.push(b("y", NirBindingOrigin::Temp));
+            locals.push(b("z", NirBindingOrigin::Temp));
+            body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("y".into()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
+                    lhs: Box::new(PreHirExpr::Var(prev)),
+                    rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                    ty: u64_ty(),
+                },
+            });
+            body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("z".into()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("y".into())),
+                    rhs: Box::new(PreHirExpr::Const(1, u64_ty())),
+                    ty: NirType::Bool,
+                },
+            });
+            let base = PreHirFunction {
+                name: format!("chain_{len}"),
+                params: vec![b("p0", NirBindingOrigin::ParamIndex(0))],
+                locals,
+                body,
+                ..Default::default()
+            };
+
+            let mut indexed_func = base.clone();
+            let t0 = std::time::Instant::now();
+            let (changed, stats) = apply_subvar_flow_pass_with_stats(&mut indexed_func);
+            let indexed_us = t0.elapsed().as_micros();
+            assert!(changed);
+            assert_eq!(stats.index_builds, 1);
+            assert_eq!(stats.rewrite_passes, 1);
+            assert_eq!(stats.indexed_stmt_visits, len + 2);
+
+            let mut legacy_func = base;
+            let t1 = std::time::Instant::now();
+            let (l_changed, stmt_scans, _) = legacy_apply_subvar_flow_pass(&mut legacy_func);
+            let legacy_us = t1.elapsed().as_micros();
+            assert_eq!(changed, l_changed);
+            assert_eq!(
+                format!("{:?}", indexed_func.body),
+                format!("{:?}", legacy_func.body)
+            );
+            eprintln!(
+                "subvar_flow chain L={len}: indexed_us={indexed_us} stmt_visits={} legacy_us={legacy_us} legacy_stmt_scans={stmt_scans}",
+                stats.indexed_stmt_visits
+            );
+        }
     }
 }
