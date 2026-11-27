@@ -2,6 +2,7 @@ use super::core::PluginManager;
 use super::types::{LoadedPlugin, PluginDestroy, release_library_instance};
 use crate::plugin::FissionPlugin;
 use crate::plugin::api::{PluginInfo, PluginType};
+use crate::security::{NATIVE_PLUGIN_ABI_VERSION, PluginManifest, PluginTrustTier};
 use std::path::Path;
 
 /// Symbol exported by a Rust dynamic plugin.
@@ -21,9 +22,11 @@ use std::path::Path;
 /// plugin ABI should replace this boundary with an explicit `repr(C)` vtable.
 #[allow(improper_ctypes_definitions)]
 type PluginCreate = unsafe extern "C" fn() -> *mut dyn FissionPlugin;
+type PluginAbiVersion = unsafe extern "C" fn() -> u32;
 
 const PLUGIN_CREATE_SYMBOL: &[u8] = b"fission_plugin_create\0";
 const PLUGIN_DESTROY_SYMBOL: &[u8] = b"fission_plugin_destroy\0";
+const PLUGIN_ABI_VERSION_SYMBOL: &[u8] = b"fission_plugin_abi_version\0";
 
 impl PluginManager {
     pub fn register_native_plugin(
@@ -56,6 +59,7 @@ impl PluginManager {
             author: "Unknown".into(),
             description: plugin.description().to_string(),
             plugin_type: PluginType::Native,
+            trust_tier: PluginTrustTier::TrustedNative,
             enabled: true,
         };
 
@@ -75,17 +79,48 @@ impl PluginManager {
         Ok(id)
     }
 
+    /// Load a trusted native dynamic plugin only if authorized by `self.security_policy`.
     pub fn load_plugin<P: AsRef<Path>>(&mut self, path: P) -> Result<String, String> {
-        let path = path.as_ref();
+        self.load_plugin_internal(path.as_ref(), None)
+    }
 
+    /// Load a trusted native dynamic plugin verified against an explicit [`PluginManifest`].
+    pub fn load_plugin_with_manifest<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        manifest: &PluginManifest,
+    ) -> Result<String, String> {
+        self.load_plugin_internal(path.as_ref(), Some(manifest))
+    }
+
+    fn load_plugin_internal(
+        &mut self,
+        path: &Path,
+        manifest: Option<&PluginManifest>,
+    ) -> Result<String, String> {
         let plugin_type = match path.extension().and_then(|e| e.to_str()) {
             Some("so") | Some("dll") | Some("dylib") => PluginType::Native,
             Some(ext) => return Err(format!("Unsupported plugin type: .{ext}")),
             _ => return Err("Unknown plugin type".into()),
         };
 
-        let library = unsafe { libloading::Library::new(path) }
+        let verified = self
+            .security_policy
+            .authorize_native_load(path, manifest)
+            .map_err(|err| format!("Failed to open plugin {:?}: {err}", path))?;
+
+        let library = unsafe { libloading::Library::new(&verified.canonical_path) }
             .map_err(|error| format!("Failed to open plugin {:?}: {error}", path))?;
+
+        if let Ok(abi_fn) = unsafe { library.get::<PluginAbiVersion>(PLUGIN_ABI_VERSION_SYMBOL) } {
+            let exported_abi = unsafe { abi_fn() };
+            if exported_abi != NATIVE_PLUGIN_ABI_VERSION {
+                return Err(format!(
+                    "Plugin {:?} exported ABI version {} (expected {})",
+                    path, exported_abi, NATIVE_PLUGIN_ABI_VERSION
+                ));
+            }
+        }
 
         let raw_plugin = unsafe {
             let constructor: libloading::Symbol<'_, PluginCreate> =
@@ -124,6 +159,16 @@ impl PluginManager {
             release_library_instance(plugin, destroy);
             return Err(format!("Plugin {:?} returned an empty plugin id", path));
         }
+        if let Some(m) = manifest {
+            let plugin_version = plugin.version().to_string();
+            if plugin_id != m.id || plugin_version != m.version {
+                release_library_instance(plugin, destroy);
+                return Err(format!(
+                    "Plugin {:?} runtime identity ({}, {}) disagrees with manifest ({}, {})",
+                    path, plugin_id, plugin_version, m.id, m.version
+                ));
+            }
+        }
         if self.plugins.contains_key(&plugin_id) {
             release_library_instance(plugin, destroy);
             return Err(format!("Plugin '{}' already loaded", plugin_id));
@@ -147,6 +192,7 @@ impl PluginManager {
             author: "Unknown".into(),
             description: plugin.description().to_string(),
             plugin_type,
+            trust_tier: PluginTrustTier::TrustedNative,
             enabled: true,
         };
 

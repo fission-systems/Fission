@@ -1245,7 +1245,12 @@ dependencies = [
  "dirs",
  "fission-core",
  "fission-loader",
+ "libc",
  "libloading",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
