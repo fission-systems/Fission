@@ -1477,23 +1477,37 @@ fn build_preview_callee_summaries(
     } else {
         super::single_flight::ExecutionMode::SingleFlight
     };
-    CALLEE_SUMMARY_SINGLE_FLIGHT
-        .get_or_try_compute(cache_key, mode, || {
-            Ok(build_preview_callee_summaries_uncached(
-                binary,
-                target_addr,
-                target_name,
-                type_context,
-                function,
-                max_bytes,
-                instruction_limit,
-                next_function,
-                &decoded.pcode,
-                decoded.complete_decode,
-            ))
-        })
-        .ok()
-        .flatten()
+    let build = || {
+        build_preview_callee_summaries_uncached(
+            binary,
+            target_addr,
+            target_name,
+            type_context,
+            function,
+            max_bytes,
+            instruction_limit,
+            next_function,
+            &decoded.pcode,
+            decoded.complete_decode,
+        )
+    };
+    match CALLEE_SUMMARY_SINGLE_FLIGHT.get_or_try_compute(cache_key, mode, || Ok(build())) {
+        Ok(summary) => summary,
+        Err(err) => {
+            // A panicking owner, a poisoned flight lock, or a cancelled waiter
+            // used to drop the summary silently. Recompute on this thread so a
+            // single failed flight does not degrade every later call site.
+            tracing::warn!(
+                target: "fission::facts",
+                address = format_args!("0x{target_addr:x}"),
+                %err,
+                "callee summary single-flight degraded; recomputing locally"
+            );
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(build))
+                .ok()
+                .flatten()
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
