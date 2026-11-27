@@ -313,6 +313,19 @@ fn why_unknown(solver: &Solver) -> Vec<String> {
         Some(UnknownReason::Unsupported(what)) => what.clone(),
         Some(UnknownReason::ConflictBudget) => vec![GAVE_UP.to_string()],
         Some(UnknownReason::OracleRefinement) => vec![REFINED_OUT.to_string()],
+        Some(UnknownReason::OracleIdentityMismatch(msg)) => vec![msg.clone()],
+        Some(UnknownReason::OracleMissingByte { space_id, address }) => {
+            vec![format!(
+                "oracle missing byte at space_{space_id}[0x{address:x}]"
+            )]
+        }
+        Some(UnknownReason::OracleBoundaryOverflow {
+            space_id,
+            address,
+            bit_width,
+        }) => vec![format!(
+            "oracle read overflow at space_{space_id}[0x{address:x}] ({bit_width} bits)"
+        )],
         None => vec!["no reason recorded".to_string()],
     }
 }
