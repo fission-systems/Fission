@@ -21,12 +21,15 @@ use fission_solver::ast::{Sort, SymExpr, SymNodeId};
 use fission_solver::solver::SatResult;
 
 use crate::eval::{interpret_hir, interpret_prehir};
-use crate::lower_sym::{self, LowerSymError, checked_scalar_type};
+use crate::lower_sym::{
+    self, LowerSymError, LoweredFunctionPaths, PATH_EXPLORE_BUDGET, SymbolicExitKind,
+    checked_scalar_type,
+};
 use crate::product::{
     AssumptionKind, AssuranceBand, AssuranceClassification, AssuranceContractError,
     AssuranceReport, CallObservation, DirCounterexample, EvidenceStrength, FoundationIdentity,
-    ObservationScope, ValidationAssumption, ValidationBudget, ValidationEvidence,
-    ValidationVerdict,
+    ObservationScope, UnresolvedEffect, UnresolvedEffectKind, ValidationAssumption,
+    ValidationBudget, ValidationEvidence, ValidationVerdict,
 };
 use crate::report::UnsupportedReason;
 
@@ -153,12 +156,131 @@ pub struct SymbolicInputCorrespondence {
     pub comparison_bits: u32,
 }
 
+/// Resolution status of one explicit symbolic proof obligation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObligationStatus {
+    /// Discharged by an explicit solver check (`Unsat` for refutation checks,
+    /// `Sat` for domain/leaf reachability).
+    Discharged,
+    /// Discharged by construction (for example, an unconstrained domain over
+    /// non-empty parameter bitvectors).
+    DischargedByConstruction,
+    /// Obligation affirmatively failed (counterexample, gap, conflict, or
+    /// missing exit model).
+    Failed { detail: String },
+    /// Solver returned `Unknown` or failed; NEVER promotes to discharged.
+    Unknown { detail: String },
+    /// Check exceeded the configured leaf/step budget; NEVER promotes to discharged.
+    SkippedBudget { detail: String },
+}
+
+impl ObligationStatus {
+    /// True only when the obligation was affirmatively discharged (`Unknown`
+    /// and `SkippedBudget` never discharge).
+    #[must_use]
+    pub fn is_discharged(&self) -> bool {
+        matches!(self, Self::Discharged | Self::DischargedByConstruction)
+    }
+}
+
+/// Non-vacuity classification of the symbolic input domain assumption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DomainNonVacuityStatus {
+    /// No extra precondition supplied; bitvector parameter domain is non-empty.
+    UnconstrainedNonEmpty,
+    /// Explicit precondition verified satisfiable (`∃ x. domain(x)`).
+    ConstrainedSatisfiable { description: String },
+    /// Explicit precondition is unsatisfiable (vacuous); equivalence rejected.
+    VacuousContradictory { description: String },
+    /// Explicit precondition could not be proved satisfiable (`Unknown` / ill-typed).
+    Unproved { description: String, detail: String },
+}
+
+/// How overlapping path predicates within a lowered function are handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OverlapPolicy {
+    /// Require path predicates to be mutually exclusive across the domain.
+    #[default]
+    RequireExclusive,
+    /// Permit overlapping path predicates only when proven value-consistent
+    /// (`∀ x ∈ domain, p_i(x) ∧ p_j(x) => v_i(x) == v_j(x)`), recording an assumption.
+    AllowConsistentOverlap,
+}
+
+/// Optional explicit input-domain precondition over the function parameters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolicDomainAssumption {
+    pub predicate: SymExpr,
+    pub description: String,
+}
+
+/// Options controlling symbolic return comparison and path-obligation checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SymbolicVerificationOptions {
+    pub return_mode: ReturnComparisonMode,
+    pub overlap_policy: OverlapPolicy,
+    /// Maximum return leaves per side checked via solver coverage/exclusivity
+    /// before reporting `ObligationStatus::SkippedBudget`.
+    pub max_solver_checked_leaves: usize,
+    /// Opt-in per-leaf reachability checks (`∃ x ∈ domain. p_i(x)`).
+    pub check_leaf_reachability: bool,
+    /// Budget cap for opt-in per-leaf reachability checks.
+    pub max_leaf_reachability_checks: usize,
+}
+
+impl Default for SymbolicVerificationOptions {
+    fn default() -> Self {
+        Self {
+            return_mode: ReturnComparisonMode::LanguageValue,
+            overlap_policy: OverlapPolicy::RequireExclusive,
+            max_solver_checked_leaves: 256,
+            check_leaf_reachability: false,
+            max_leaf_reachability_checks: 64,
+        }
+    }
+}
+
+/// Per-side exit-kind counts and obligation verdicts before/around ITE folding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidePathObligationReport {
+    pub total_leaves: usize,
+    pub return_leaf_count: usize,
+    pub void_return_count: usize,
+    pub fallthrough_count: usize,
+    pub unresolved_goto_count: usize,
+    pub cyclic_goto_count: usize,
+    pub nonreturning_count: usize,
+    pub fault_count: usize,
+    pub unsupported_count: usize,
+    pub explored_steps: usize,
+    pub budget_limit: usize,
+    pub complete_exit_modeling: ObligationStatus,
+    pub path_coverage: ObligationStatus,
+    pub path_exclusivity: ObligationStatus,
+    pub overlap_value_consistency: Option<ObligationStatus>,
+    pub reachable_leaf_count: Option<usize>,
+    pub unreachable_leaf_count: Option<usize>,
+    pub leaf_reachability: Option<ObligationStatus>,
+}
+
+/// Complete domain non-vacuity, exit modeling, path coverage, and exclusivity
+/// report for a symbolic equivalence query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolicPathObligationReport {
+    pub domain_non_vacuity: ObligationStatus,
+    pub domain_kind: DomainNonVacuityStatus,
+    pub prehir: SidePathObligationReport,
+    pub hir: SidePathObligationReport,
+    pub all_required_discharged: bool,
+}
+
 /// Full symbolic verification report reusing [`crate::product`]'s verdict,
 /// scope, assumption, and evidence taxonomy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolicEquivalenceReport {
     pub outcome: SymbolicOutcome,
     pub correspondence: Option<SymbolicInputCorrespondence>,
+    pub path_obligations: Option<SymbolicPathObligationReport>,
     pub rejection_reason: Option<String>,
     pub scope: ObservationScope,
     pub verdict: ValidationVerdict,
@@ -302,25 +424,37 @@ struct PreparedSymbolicQuery {
     correspondence: SymbolicInputCorrespondence,
     assumptions: Vec<ValidationAssumption>,
     param_specs: Vec<ParamSpec>,
+    domain_predicate: Option<SymExpr>,
+    explored_paths: u64,
+    path_obligations: SymbolicPathObligationReport,
 }
 
 fn format_failure_evidence(detail: impl Into<String>) -> ValidationEvidence {
     ValidationEvidence::none(detail)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn inconclusive_report(
     correspondence: Option<SymbolicInputCorrespondence>,
+    path_obligations: Option<SymbolicPathObligationReport>,
     assumptions: Vec<ValidationAssumption>,
+    unresolved_effects: Vec<UnresolvedEffect>,
+    explored_paths: u64,
+    max_paths: Option<u64>,
     reason: impl Into<String>,
 ) -> SymbolicEquivalenceReport {
     let reason = reason.into();
     let mut evidence = format_failure_evidence(reason.clone());
     evidence.assumptions = assumptions;
+    evidence.unresolved_effects = unresolved_effects;
+    evidence.explored_paths = explored_paths;
+    evidence.budget.max_paths = max_paths;
     SymbolicEquivalenceReport {
         outcome: SymbolicOutcome::Inconclusive {
             reason: reason.clone(),
         },
         correspondence,
+        path_obligations,
         rejection_reason: Some(reason),
         scope: symbolic_ast_return_scope(),
         verdict: ValidationVerdict::Inconclusive,
@@ -328,18 +462,27 @@ fn inconclusive_report(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn unsupported_report(
     correspondence: Option<SymbolicInputCorrespondence>,
+    path_obligations: Option<SymbolicPathObligationReport>,
     assumptions: Vec<ValidationAssumption>,
+    unresolved_effects: Vec<UnresolvedEffect>,
+    explored_paths: u64,
+    max_paths: Option<u64>,
     reason: UnsupportedReason,
     detail: impl Into<String>,
 ) -> SymbolicEquivalenceReport {
     let detail = detail.into();
     let mut evidence = format_failure_evidence(detail.clone());
     evidence.assumptions = assumptions;
+    evidence.unresolved_effects = unresolved_effects;
+    evidence.explored_paths = explored_paths;
+    evidence.budget.max_paths = max_paths;
     SymbolicEquivalenceReport {
         outcome: SymbolicOutcome::Unsupported(reason),
         correspondence,
+        path_obligations,
         rejection_reason: Some(detail),
         scope: symbolic_ast_return_scope(),
         verdict: ValidationVerdict::Unsupported,
@@ -352,7 +495,15 @@ fn inconclusive_err(
     assumptions: Vec<ValidationAssumption>,
     reason: impl Into<String>,
 ) -> Box<SymbolicEquivalenceReport> {
-    Box::new(inconclusive_report(correspondence, assumptions, reason))
+    Box::new(inconclusive_report(
+        correspondence,
+        None,
+        assumptions,
+        Vec::new(),
+        0,
+        None,
+        reason,
+    ))
 }
 
 fn unsupported_err(
@@ -363,7 +514,11 @@ fn unsupported_err(
 ) -> Box<SymbolicEquivalenceReport> {
     Box::new(unsupported_report(
         correspondence,
+        None,
         assumptions,
+        Vec::new(),
+        0,
+        None,
         reason,
         detail,
     ))
@@ -510,17 +665,23 @@ where
     Ok(())
 }
 
-fn prepare_symbolic_query(
+struct PreparedInputDomain {
+    param_specs: Vec<ParamSpec>,
+    param_vars: Vec<SymExpr>,
+    param_correspondences: Vec<ParamCorrespondence>,
+    pre_ret_bits: u32,
+    pre_ret_signed: bool,
+    hir_ret_bits: u32,
+    hir_ret_signed: bool,
+    prehir_return_type: NirType,
+    hir_return_type: NirType,
+    assumptions: Vec<ValidationAssumption>,
+}
+
+fn prepare_input_domain(
     prehir: &PreHirFunction,
     hir: &HirFunction,
-    return_mode: ReturnComparisonMode,
-) -> Result<PreparedSymbolicQuery, Box<SymbolicEquivalenceReport>> {
-    if lower_sym::prehir::contains_loop(&prehir.body) || lower_sym::hir::contains_loop(&hir.body) {
-        let reason = UnsupportedReason::ContainsLoop;
-        let detail = reason.to_string();
-        return Err(unsupported_err(None, Vec::new(), reason, detail));
-    }
-
+) -> Result<PreparedInputDomain, Box<SymbolicEquivalenceReport>> {
     validate_abi_signature(prehir, hir)?;
 
     if prehir.params.len() != hir.params.len() {
@@ -673,55 +834,17 @@ fn prepare_symbolic_query(
         });
     }
 
-    let prehir_result = match lower_sym::prehir::lower_checked(
-        &prehir.body,
-        &prehir.params,
-        &prehir.locals,
-        &param_vars,
-    ) {
-        Ok(e) => e,
-        Err(err) => return Err(Box::new(map_lowering_error("PreHIR", err, assumptions))),
-    };
-    let hir_result =
-        match lower_sym::hir::lower_checked(&hir.body, &hir.params, &hir.locals, &param_vars) {
-            Ok(e) => e,
-            Err(err) => return Err(Box::new(map_lowering_error("HIR", err, assumptions))),
-        };
-
-    let pre_expr_bits = checked_sym_bits(&prehir_result, assumptions.clone())?;
-    let hir_expr_bits = checked_sym_bits(&hir_result, assumptions.clone())?;
-
-    let (return_relation, cmp_bits, inequality) = build_return_inequality(
-        prehir_result.clone(),
-        hir_result.clone(),
-        pre_expr_bits,
+    Ok(PreparedInputDomain {
+        param_specs,
+        param_vars,
+        param_correspondences,
         pre_ret_bits,
         pre_ret_signed,
-        hir_expr_bits,
         hir_ret_bits,
         hir_ret_signed,
-        return_mode,
-        &mut assumptions,
-    )?;
-
-    let correspondence = SymbolicInputCorrespondence {
-        params: param_correspondences,
-        return_mode,
-        return_relation,
         prehir_return_type: prehir.return_type.clone(),
         hir_return_type: hir.return_type.clone(),
-        prehir_return_bits: pre_ret_bits,
-        hir_return_bits: hir_ret_bits,
-        comparison_bits: cmp_bits,
-    };
-
-    Ok(PreparedSymbolicQuery {
-        prehir_expr: prehir_result,
-        hir_expr: hir_result,
-        inequality,
-        correspondence,
         assumptions,
-        param_specs,
     })
 }
 
@@ -729,24 +852,1202 @@ fn map_lowering_error(
     side: &str,
     err: LowerSymError,
     assumptions: Vec<ValidationAssumption>,
+    path_obligations: Option<SymbolicPathObligationReport>,
+    explored_paths: u64,
 ) -> SymbolicEquivalenceReport {
     tracing::debug!("lower_sym: {side} side failed: {err}");
     match err {
         LowerSymError::UnsupportedType(msg) => {
             let reason = UnsupportedReason::UnsupportedType(msg);
             let detail = reason.to_string();
-            unsupported_report(None, assumptions, reason, detail)
+            unsupported_report(
+                None,
+                path_obligations,
+                assumptions,
+                Vec::new(),
+                explored_paths,
+                Some(PATH_EXPLORE_BUDGET as u64),
+                reason,
+                detail,
+            )
         }
-        LowerSymError::InvalidBinding(msg) => inconclusive_report(None, assumptions, msg),
+        LowerSymError::InvalidBinding(msg) => inconclusive_report(
+            None,
+            path_obligations,
+            assumptions,
+            Vec::new(),
+            explored_paths,
+            Some(PATH_EXPLORE_BUDGET as u64),
+            msg,
+        ),
+        LowerSymError::CyclicControlFlow(detail) => unsupported_report(
+            None,
+            path_obligations,
+            assumptions,
+            Vec::new(),
+            explored_paths,
+            Some(PATH_EXPLORE_BUDGET as u64),
+            UnsupportedReason::ContainsLoop,
+            detail,
+        ),
+        LowerSymError::BudgetExceeded { steps, limit } => {
+            let detail = format!(
+                "{side} side exceeded symbolic path-exploration budget ({steps} > {limit} steps)"
+            );
+            unsupported_report(
+                None,
+                path_obligations,
+                assumptions,
+                vec![UnresolvedEffect {
+                    kind: UnresolvedEffectKind::PathBudget,
+                    description: detail.clone(),
+                }],
+                explored_paths,
+                Some(limit as u64),
+                UnsupportedReason::Construct("path-exploration budget exceeded"),
+                detail,
+            )
+        }
         LowerSymError::UnsupportedConstruct(detail) => {
             let reason = UnsupportedReason::Construct(if side == "PreHIR" {
                 "PreHIR side uses a construct the symbolic tier doesn't model (see debug logs)"
             } else {
                 "HIR side uses a construct the symbolic tier doesn't model (see debug logs)"
             });
-            unsupported_report(None, assumptions, reason, detail)
+            unsupported_report(
+                None,
+                path_obligations,
+                assumptions,
+                Vec::new(),
+                explored_paths,
+                Some(PATH_EXPLORE_BUDGET as u64),
+                reason,
+                detail,
+            )
         }
     }
+}
+
+fn bool_const(val: bool) -> SymExpr {
+    SymExpr::Const {
+        val: u64::from(val),
+        size: 1,
+    }
+}
+
+fn is_bool_const(expr: &SymExpr) -> Option<bool> {
+    match expr {
+        SymExpr::Const { val, size: 1 } => Some(*val != 0),
+        _ => None,
+    }
+}
+
+fn bool_not(a: &SymExpr) -> SymExpr {
+    match is_bool_const(a) {
+        Some(v) => bool_const(!v),
+        None => SymExpr::new_not(a.clone()),
+    }
+}
+
+fn bool_and(a: &SymExpr, b: &SymExpr) -> SymExpr {
+    match (is_bool_const(a), is_bool_const(b)) {
+        (Some(false), _) | (_, Some(false)) => bool_const(false),
+        (Some(true), _) => b.clone(),
+        (_, Some(true)) => a.clone(),
+        _ => SymExpr::Ite {
+            cond: Box::new(a.clone()),
+            t: Box::new(b.clone()),
+            f: Box::new(bool_const(false)),
+        },
+    }
+}
+
+fn bool_or(a: &SymExpr, b: &SymExpr) -> SymExpr {
+    match (is_bool_const(a), is_bool_const(b)) {
+        (Some(true), _) | (_, Some(true)) => bool_const(true),
+        (Some(false), _) => b.clone(),
+        (_, Some(false)) => a.clone(),
+        _ => SymExpr::Ite {
+            cond: Box::new(a.clone()),
+            t: Box::new(bool_const(true)),
+            f: Box::new(b.clone()),
+        },
+    }
+}
+
+fn default_solver_sat(constraint: &SymExpr) -> Result<SatResult, String> {
+    let mut solver = Solver::new();
+    solver.assert(constraint.clone());
+    solver.check_sat().map_err(|err| err.to_string())
+}
+
+fn check_side_path_obligations_with_runner<F>(
+    side: &str,
+    paths: &LoweredFunctionPaths,
+    domain: Option<&SymExpr>,
+    options: SymbolicVerificationOptions,
+    run_sat: &mut F,
+) -> SidePathObligationReport
+where
+    F: FnMut(&SymExpr) -> Result<SatResult, String>,
+{
+    let mut void_return_count = 0usize;
+    let mut fallthrough_count = 0usize;
+    let mut unresolved_goto_count = 0usize;
+    let mut cyclic_goto_count = 0usize;
+    let mut nonreturning_count = 0usize;
+    let mut fault_count = 0usize;
+    let mut unsupported_count = 0usize;
+    let mut return_leaves: Vec<(&SymExpr, &SymExpr)> = Vec::new();
+
+    for leaf in &paths.leaves {
+        match &leaf.exit {
+            SymbolicExitKind::ReturnValue(val) => return_leaves.push((&leaf.path_cond, val)),
+            SymbolicExitKind::VoidReturn => void_return_count += 1,
+            SymbolicExitKind::Fallthrough => fallthrough_count += 1,
+            SymbolicExitKind::UnresolvedGoto(_) => unresolved_goto_count += 1,
+            SymbolicExitKind::CyclicGoto(_) => cyclic_goto_count += 1,
+            SymbolicExitKind::NonReturning(_) => nonreturning_count += 1,
+            SymbolicExitKind::Fault(_) => fault_count += 1,
+            SymbolicExitKind::Unsupported(_) => unsupported_count += 1,
+        }
+    }
+
+    let total_leaves = paths.leaves.len();
+    let return_leaf_count = return_leaves.len();
+    let complete_exit_modeling = if total_leaves == 0 {
+        ObligationStatus::Failed {
+            detail: format!("{side} explored zero paths"),
+        }
+    } else if return_leaf_count != total_leaves {
+        ObligationStatus::Failed {
+            detail: format!(
+                "{side} has non-value exits (void={void_return_count}, fallthrough={fallthrough_count}, \
+                 unresolved_goto={unresolved_goto_count}, cyclic_goto={cyclic_goto_count}, \
+                 nonreturning={nonreturning_count}, fault={fault_count}, unsupported={unsupported_count})"
+            ),
+        }
+    } else {
+        let mut shape_err = None;
+        let expected_bits = return_leaves[0].1.get_bit_width();
+        if !(1..=64).contains(&expected_bits) {
+            shape_err = Some(format!(
+                "{side} return leaf has unsupported {expected_bits}-bit width"
+            ));
+        } else {
+            for (cond, val) in &return_leaves {
+                if cond.get_sort() != Sort::BitVector(1) {
+                    shape_err = Some(format!(
+                        "{side} path predicate must have 1-bit bitvector sort, got {:?}",
+                        cond.get_sort()
+                    ));
+                    break;
+                }
+                let val_bits = val.get_bit_width();
+                if val_bits != expected_bits {
+                    shape_err = Some(format!(
+                        "{side} return branches produce mismatched widths ({val_bits}-bit vs {expected_bits}-bit)"
+                    ));
+                    break;
+                }
+            }
+        }
+        match shape_err {
+            Some(detail) => ObligationStatus::Failed { detail },
+            None => ObligationStatus::Discharged,
+        }
+    };
+
+    if !complete_exit_modeling.is_discharged() {
+        let detail = format!("{side} exits are incomplete; coverage/exclusivity not discharged");
+        return SidePathObligationReport {
+            total_leaves,
+            return_leaf_count,
+            void_return_count,
+            fallthrough_count,
+            unresolved_goto_count,
+            cyclic_goto_count,
+            nonreturning_count,
+            fault_count,
+            unsupported_count,
+            explored_steps: paths.explored_steps,
+            budget_limit: paths.budget_limit,
+            complete_exit_modeling,
+            path_coverage: ObligationStatus::Failed {
+                detail: detail.clone(),
+            },
+            path_exclusivity: ObligationStatus::Failed { detail },
+            overlap_value_consistency: None,
+            reachable_leaf_count: None,
+            unreachable_leaf_count: None,
+            leaf_reachability: None,
+        };
+    }
+
+    let effective_domain = domain.cloned().unwrap_or_else(|| bool_const(true));
+
+    let (path_coverage, path_exclusivity, overlap_value_consistency) = if return_leaf_count
+        > options.max_solver_checked_leaves
+    {
+        let detail = format!(
+            "{side} return leaf count ({return_leaf_count}) exceeds obligation check budget ({})",
+            options.max_solver_checked_leaves
+        );
+        (
+            ObligationStatus::SkippedBudget {
+                detail: detail.clone(),
+            },
+            ObligationStatus::SkippedBudget { detail },
+            None,
+        )
+    } else {
+        // Single O(n) linear pass building union (`seen`) and pairwise overlap
+        // (`overlap`) circuits over the return-leaf path predicates.
+        let mut seen = bool_const(false);
+        let mut overlap = bool_const(false);
+        for (cond, _) in &return_leaves {
+            overlap = bool_or(&overlap, &bool_and(&seen, cond));
+            seen = bool_or(&seen, cond);
+        }
+
+        let not_covered = bool_and(&effective_domain, &bool_not(&seen));
+        let coverage_query = SymExpr::new_eq(not_covered, bool_const(true));
+        let path_coverage = match run_sat(&coverage_query) {
+            Ok(SatResult::Unsat) => ObligationStatus::Discharged,
+            Ok(SatResult::Sat) => ObligationStatus::Failed {
+                detail: format!("{side} path predicates fail to cover the input domain"),
+            },
+            Ok(SatResult::Unknown) => ObligationStatus::Unknown {
+                detail: format!("{side} path-coverage check returned solver Unknown"),
+            },
+            Err(err) => ObligationStatus::Unknown {
+                detail: format!("{side} path-coverage solver check failed: {err}"),
+            },
+        };
+
+        let overlap_in_domain = bool_and(&effective_domain, &overlap);
+        let overlap_query = SymExpr::new_eq(overlap_in_domain, bool_const(true));
+        let (path_exclusivity, overlap_value_consistency) = match run_sat(&overlap_query) {
+            Ok(SatResult::Unsat) => (ObligationStatus::Discharged, None),
+            Ok(SatResult::Sat) => {
+                let mut has_val = bool_const(false);
+                let mut first_val = return_leaves[0].1.clone();
+                let mut conflict = bool_const(false);
+                for (cond, val) in &return_leaves {
+                    let neq = SymExpr::new_neq(first_val.clone(), (*val).clone());
+                    conflict = bool_or(&conflict, &bool_and(&has_val, &bool_and(cond, &neq)));
+                    let take_first = bool_and(&bool_not(&has_val), cond);
+                    first_val = match is_bool_const(&take_first) {
+                        Some(true) => (*val).clone(),
+                        Some(false) => first_val,
+                        None => SymExpr::Ite {
+                            cond: Box::new(take_first),
+                            t: Box::new((*val).clone()),
+                            f: Box::new(first_val),
+                        },
+                    };
+                    has_val = bool_or(&has_val, cond);
+                }
+                let conflict_in_domain = bool_and(&effective_domain, &conflict);
+                let conflict_query = SymExpr::new_eq(conflict_in_domain, bool_const(true));
+                let consistency = match run_sat(&conflict_query) {
+                    Ok(SatResult::Unsat) => ObligationStatus::Discharged,
+                    Ok(SatResult::Sat) => ObligationStatus::Failed {
+                        detail: format!(
+                            "{side} overlapping path predicates produce conflicting return values"
+                        ),
+                    },
+                    Ok(SatResult::Unknown) => ObligationStatus::Unknown {
+                        detail: format!("{side} overlap-consistency check returned solver Unknown"),
+                    },
+                    Err(err) => ObligationStatus::Unknown {
+                        detail: format!("{side} overlap-consistency solver check failed: {err}"),
+                    },
+                };
+                (
+                    ObligationStatus::Failed {
+                        detail: format!(
+                            "{side} path predicates overlap on at least one in-domain input"
+                        ),
+                    },
+                    Some(consistency),
+                )
+            }
+            Ok(SatResult::Unknown) => (
+                ObligationStatus::Unknown {
+                    detail: format!("{side} path-exclusivity check returned solver Unknown"),
+                },
+                None,
+            ),
+            Err(err) => (
+                ObligationStatus::Unknown {
+                    detail: format!("{side} path-exclusivity solver check failed: {err}"),
+                },
+                None,
+            ),
+        };
+
+        (path_coverage, path_exclusivity, overlap_value_consistency)
+    };
+
+    let (reachable_leaf_count, unreachable_leaf_count, leaf_reachability) = if !options
+        .check_leaf_reachability
+    {
+        (None, None, None)
+    } else if return_leaf_count > options.max_leaf_reachability_checks {
+        (
+            None,
+            None,
+            Some(ObligationStatus::SkippedBudget {
+                detail: format!(
+                    "{side} leaf reachability count ({return_leaf_count}) exceeds budget ({})",
+                    options.max_leaf_reachability_checks
+                ),
+            }),
+        )
+    } else {
+        let mut reachable = 0usize;
+        let mut unreachable = 0usize;
+        let mut unknown_detail = None;
+        for (cond, _) in &return_leaves {
+            let leaf_q = SymExpr::new_eq(bool_and(&effective_domain, cond), bool_const(true));
+            match run_sat(&leaf_q) {
+                Ok(SatResult::Sat) => reachable += 1,
+                Ok(SatResult::Unsat) => unreachable += 1,
+                Ok(SatResult::Unknown) => {
+                    unknown_detail = Some(format!(
+                        "{side} leaf reachability check returned solver Unknown"
+                    ));
+                    break;
+                }
+                Err(err) => {
+                    unknown_detail = Some(format!("{side} leaf reachability check failed: {err}"));
+                    break;
+                }
+            }
+        }
+        match unknown_detail {
+            Some(detail) => (
+                Some(reachable),
+                Some(unreachable),
+                Some(ObligationStatus::Unknown { detail }),
+            ),
+            None => (
+                Some(reachable),
+                Some(unreachable),
+                Some(ObligationStatus::Discharged),
+            ),
+        }
+    };
+
+    SidePathObligationReport {
+        total_leaves,
+        return_leaf_count,
+        void_return_count,
+        fallthrough_count,
+        unresolved_goto_count,
+        cyclic_goto_count,
+        nonreturning_count,
+        fault_count,
+        unsupported_count,
+        explored_steps: paths.explored_steps,
+        budget_limit: paths.budget_limit,
+        complete_exit_modeling,
+        path_coverage,
+        path_exclusivity,
+        overlap_value_consistency,
+        reachable_leaf_count,
+        unreachable_leaf_count,
+        leaf_reachability,
+    }
+}
+
+/// Evaluate structural exit completeness, domain coverage, path exclusivity,
+/// overlap consistency, and opt-in leaf reachability for one lowered function.
+#[must_use]
+pub fn check_side_path_obligations(
+    side: &str,
+    paths: &LoweredFunctionPaths,
+    domain: Option<&SymExpr>,
+    options: SymbolicVerificationOptions,
+) -> SidePathObligationReport {
+    let mut runner = default_solver_sat;
+    check_side_path_obligations_with_runner(side, paths, domain, options, &mut runner)
+}
+
+fn side_exclusivity_discharged(report: &SidePathObligationReport, policy: OverlapPolicy) -> bool {
+    match &report.path_exclusivity {
+        ObligationStatus::Discharged | ObligationStatus::DischargedByConstruction => true,
+        ObligationStatus::Failed { .. } => {
+            policy == OverlapPolicy::AllowConsistentOverlap
+                && matches!(
+                    &report.overlap_value_consistency,
+                    Some(status) if status.is_discharged()
+                )
+        }
+        ObligationStatus::Unknown { .. } | ObligationStatus::SkippedBudget { .. } => false,
+    }
+}
+
+fn side_obligations_discharged(report: &SidePathObligationReport, policy: OverlapPolicy) -> bool {
+    let reachability_ok = match &report.leaf_reachability {
+        None => true,
+        Some(status) => status.is_discharged(),
+    };
+    report.complete_exit_modeling.is_discharged()
+        && report.path_coverage.is_discharged()
+        && side_exclusivity_discharged(report, policy)
+        && reachability_ok
+}
+
+fn check_domain_non_vacuity_with_runner<F>(
+    param_specs: &[ParamSpec],
+    domain: Option<&SymbolicDomainAssumption>,
+    run_sat: &mut F,
+) -> (ObligationStatus, DomainNonVacuityStatus, Option<String>)
+where
+    F: FnMut(&SymExpr) -> Result<SatResult, String>,
+{
+    let Some(domain) = domain else {
+        return (
+            ObligationStatus::DischargedByConstruction,
+            DomainNonVacuityStatus::UnconstrainedNonEmpty,
+            None,
+        );
+    };
+
+    if domain.predicate.get_sort() != Sort::BitVector(1) {
+        let detail = format!(
+            "domain assumption '{}' must have 1-bit bitvector sort, got {:?}",
+            domain.description,
+            domain.predicate.get_sort()
+        );
+        return (
+            ObligationStatus::Failed {
+                detail: detail.clone(),
+            },
+            DomainNonVacuityStatus::Unproved {
+                description: domain.description.clone(),
+                detail: detail.clone(),
+            },
+            Some(detail),
+        );
+    }
+
+    let known_vars: HashMap<SymNodeId, u32> = param_specs
+        .iter()
+        .map(|spec| (spec.var_id, spec.width_bits))
+        .collect();
+    let mut foreign_var = None;
+    domain.predicate.visit_preorder(&mut |expr| {
+        if foreign_var.is_none()
+            && let SymExpr::Var { id, name, .. } = expr
+            && !known_vars.contains_key(id)
+        {
+            foreign_var = Some(format!(
+                "domain assumption '{}' references unbound variable '{name}' (id={id})",
+                domain.description
+            ));
+        }
+    });
+    if let Some(detail) = foreign_var {
+        return (
+            ObligationStatus::Failed {
+                detail: detail.clone(),
+            },
+            DomainNonVacuityStatus::Unproved {
+                description: domain.description.clone(),
+                detail: detail.clone(),
+            },
+            Some(detail),
+        );
+    }
+
+    let sat_query = SymExpr::new_eq(domain.predicate.clone(), bool_const(true));
+    match run_sat(&sat_query) {
+        Ok(SatResult::Sat) => (
+            ObligationStatus::Discharged,
+            DomainNonVacuityStatus::ConstrainedSatisfiable {
+                description: domain.description.clone(),
+            },
+            None,
+        ),
+        Ok(SatResult::Unsat) => {
+            let detail = format!(
+                "domain assumption '{}' is contradictory/unsatisfiable; rejecting vacuous equivalence",
+                domain.description
+            );
+            (
+                ObligationStatus::Failed {
+                    detail: detail.clone(),
+                },
+                DomainNonVacuityStatus::VacuousContradictory {
+                    description: domain.description.clone(),
+                },
+                Some(detail),
+            )
+        }
+        Ok(SatResult::Unknown) => {
+            let detail = format!(
+                "domain non-vacuity check for '{}' returned solver Unknown",
+                domain.description
+            );
+            (
+                ObligationStatus::Unknown {
+                    detail: detail.clone(),
+                },
+                DomainNonVacuityStatus::Unproved {
+                    description: domain.description.clone(),
+                    detail: detail.clone(),
+                },
+                Some(detail),
+            )
+        }
+        Err(err) => {
+            let detail = format!(
+                "domain non-vacuity check for '{}' failed: {err}",
+                domain.description
+            );
+            (
+                ObligationStatus::Unknown {
+                    detail: detail.clone(),
+                },
+                DomainNonVacuityStatus::Unproved {
+                    description: domain.description.clone(),
+                    detail: detail.clone(),
+                },
+                Some(detail),
+            )
+        }
+    }
+}
+
+fn side_has_budget_skip(report: &SidePathObligationReport) -> Option<String> {
+    if let ObligationStatus::SkippedBudget { detail } = &report.path_coverage {
+        return Some(detail.clone());
+    }
+    if let ObligationStatus::SkippedBudget { detail } = &report.path_exclusivity {
+        return Some(detail.clone());
+    }
+    if let Some(ObligationStatus::SkippedBudget { detail }) = &report.overlap_value_consistency {
+        return Some(detail.clone());
+    }
+    if let Some(ObligationStatus::SkippedBudget { detail }) = &report.leaf_reachability {
+        return Some(detail.clone());
+    }
+    None
+}
+
+fn summarize_obligation_failure(obligations: &SymbolicPathObligationReport) -> String {
+    if !obligations.domain_non_vacuity.is_discharged() {
+        match &obligations.domain_non_vacuity {
+            ObligationStatus::Failed { detail }
+            | ObligationStatus::Unknown { detail }
+            | ObligationStatus::SkippedBudget { detail } => return detail.clone(),
+            ObligationStatus::Discharged | ObligationStatus::DischargedByConstruction => {}
+        }
+    }
+    for side in [&obligations.prehir, &obligations.hir] {
+        for status in [&side.complete_exit_modeling, &side.path_coverage] {
+            if let ObligationStatus::Failed { detail }
+            | ObligationStatus::Unknown { detail }
+            | ObligationStatus::SkippedBudget { detail } = status
+            {
+                return detail.clone();
+            }
+        }
+        if let Some(
+            ObligationStatus::Failed { detail }
+            | ObligationStatus::Unknown { detail }
+            | ObligationStatus::SkippedBudget { detail },
+        ) = &side.overlap_value_consistency
+        {
+            return detail.clone();
+        }
+        if let ObligationStatus::Failed { detail }
+        | ObligationStatus::Unknown { detail }
+        | ObligationStatus::SkippedBudget { detail } = &side.path_exclusivity
+        {
+            return detail.clone();
+        }
+        if let Some(
+            ObligationStatus::Failed { detail }
+            | ObligationStatus::Unknown { detail }
+            | ObligationStatus::SkippedBudget { detail },
+        ) = &side.leaf_reachability
+        {
+            return detail.clone();
+        }
+    }
+    "symbolic path obligations were not discharged".to_string()
+}
+
+fn evaluate_lowered_paths_with_runner<F>(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    mut domain_info: PreparedInputDomain,
+    prehir_paths: &LoweredFunctionPaths,
+    hir_paths: &LoweredFunctionPaths,
+    options: SymbolicVerificationOptions,
+    domain: Option<SymbolicDomainAssumption>,
+    from_ast_lowering: bool,
+    run_sat: &mut F,
+) -> SymbolicEquivalenceReport
+where
+    F: FnMut(&SymExpr) -> Result<SatResult, String>,
+{
+    let explored_paths = (prehir_paths.leaves.len() + hir_paths.leaves.len()) as u64;
+    let max_paths = Some(
+        prehir_paths
+            .budget_limit
+            .max(hir_paths.budget_limit)
+            .max(PATH_EXPLORE_BUDGET) as u64,
+    );
+
+    let (domain_non_vacuity, domain_kind, domain_err) =
+        check_domain_non_vacuity_with_runner(&domain_info.param_specs, domain.as_ref(), run_sat);
+
+    let valid_domain_expr = if domain_err.is_none() {
+        domain.as_ref().map(|d| &d.predicate)
+    } else {
+        None
+    };
+
+    let prehir_side = check_side_path_obligations_with_runner(
+        "PreHIR",
+        prehir_paths,
+        valid_domain_expr,
+        options,
+        run_sat,
+    );
+    let hir_side = check_side_path_obligations_with_runner(
+        "HIR",
+        hir_paths,
+        valid_domain_expr,
+        options,
+        run_sat,
+    );
+
+    if domain_non_vacuity.is_discharged()
+        && let Some(ref dom) = domain
+    {
+        domain_info.assumptions.push(ValidationAssumption {
+            kind: AssumptionKind::InputRange,
+            description: format!(
+                "precondition assumed (verified satisfiable): {}",
+                dom.description
+            ),
+        });
+    }
+
+    if options.overlap_policy == OverlapPolicy::AllowConsistentOverlap {
+        for (side_name, side_rep) in [("PreHIR", &prehir_side), ("HIR", &hir_side)] {
+            if matches!(side_rep.path_exclusivity, ObligationStatus::Failed { .. })
+                && matches!(
+                    &side_rep.overlap_value_consistency,
+                    Some(status) if status.is_discharged()
+                )
+            {
+                domain_info.assumptions.push(ValidationAssumption {
+                    kind: AssumptionKind::Other,
+                    description: format!(
+                        "{side_name} path predicates overlap on some inputs; accepted only \
+                         because overlap value consistency proved identical return values"
+                    ),
+                });
+            }
+        }
+    }
+
+    let all_required_discharged = domain_non_vacuity.is_discharged()
+        && side_obligations_discharged(&prehir_side, options.overlap_policy)
+        && side_obligations_discharged(&hir_side, options.overlap_policy);
+
+    let obligations = SymbolicPathObligationReport {
+        domain_non_vacuity,
+        domain_kind,
+        prehir: prehir_side,
+        hir: hir_side,
+        all_required_discharged,
+    };
+
+    if from_ast_lowering {
+        if obligations.prehir.cyclic_goto_count > 0 {
+            let err = prehir_paths
+                .fold_return_ite()
+                .expect_err("cyclic goto should fail folding");
+            return map_lowering_error(
+                "PreHIR",
+                err,
+                domain_info.assumptions,
+                Some(obligations),
+                explored_paths,
+            );
+        }
+        if obligations.hir.cyclic_goto_count > 0 {
+            let err = hir_paths
+                .fold_return_ite()
+                .expect_err("cyclic goto should fail folding");
+            return map_lowering_error(
+                "HIR",
+                err,
+                domain_info.assumptions,
+                Some(obligations),
+                explored_paths,
+            );
+        }
+        if !obligations.prehir.complete_exit_modeling.is_discharged() {
+            let err = prehir_paths
+                .fold_return_ite()
+                .expect_err("incomplete PreHIR paths should fail folding");
+            return map_lowering_error(
+                "PreHIR",
+                err,
+                domain_info.assumptions,
+                Some(obligations),
+                explored_paths,
+            );
+        }
+        if !obligations.hir.complete_exit_modeling.is_discharged() {
+            let err = hir_paths
+                .fold_return_ite()
+                .expect_err("incomplete HIR paths should fail folding");
+            return map_lowering_error(
+                "HIR",
+                err,
+                domain_info.assumptions,
+                Some(obligations),
+                explored_paths,
+            );
+        }
+    }
+
+    if !obligations.all_required_discharged {
+        let mut unresolved = Vec::new();
+        for side in [&obligations.prehir, &obligations.hir] {
+            if let Some(detail) = side_has_budget_skip(side) {
+                unresolved.push(UnresolvedEffect {
+                    kind: UnresolvedEffectKind::PathBudget,
+                    description: detail,
+                });
+            }
+        }
+        let reason = domain_err.unwrap_or_else(|| summarize_obligation_failure(&obligations));
+        return inconclusive_report(
+            None,
+            Some(obligations),
+            domain_info.assumptions,
+            unresolved,
+            explored_paths,
+            max_paths,
+            reason,
+        );
+    }
+
+    let prehir_result = match prehir_paths.fold_return_ite() {
+        Ok(expr) => expr,
+        Err(err) => {
+            return map_lowering_error(
+                "PreHIR",
+                err,
+                domain_info.assumptions,
+                Some(obligations),
+                explored_paths,
+            );
+        }
+    };
+    let hir_result = match hir_paths.fold_return_ite() {
+        Ok(expr) => expr,
+        Err(err) => {
+            return map_lowering_error(
+                "HIR",
+                err,
+                domain_info.assumptions,
+                Some(obligations),
+                explored_paths,
+            );
+        }
+    };
+
+    let pre_expr_bits = match checked_sym_bits(&prehir_result, domain_info.assumptions.clone()) {
+        Ok(bits) => bits,
+        Err(mut report) => {
+            report.path_obligations = Some(obligations);
+            report.evidence.explored_paths = explored_paths;
+            report.evidence.budget.max_paths = max_paths;
+            return *report;
+        }
+    };
+    let hir_expr_bits = match checked_sym_bits(&hir_result, domain_info.assumptions.clone()) {
+        Ok(bits) => bits,
+        Err(mut report) => {
+            report.path_obligations = Some(obligations);
+            report.evidence.explored_paths = explored_paths;
+            report.evidence.budget.max_paths = max_paths;
+            return *report;
+        }
+    };
+
+    let (return_relation, cmp_bits, inequality) = match build_return_inequality(
+        prehir_result.clone(),
+        hir_result.clone(),
+        pre_expr_bits,
+        domain_info.pre_ret_bits,
+        domain_info.pre_ret_signed,
+        hir_expr_bits,
+        domain_info.hir_ret_bits,
+        domain_info.hir_ret_signed,
+        options.return_mode,
+        &mut domain_info.assumptions,
+    ) {
+        Ok(res) => res,
+        Err(mut report) => {
+            report.path_obligations = Some(obligations);
+            report.evidence.explored_paths = explored_paths;
+            report.evidence.budget.max_paths = max_paths;
+            return *report;
+        }
+    };
+
+    let correspondence = SymbolicInputCorrespondence {
+        params: domain_info.param_correspondences,
+        return_mode: options.return_mode,
+        return_relation,
+        prehir_return_type: domain_info.prehir_return_type,
+        hir_return_type: domain_info.hir_return_type,
+        prehir_return_bits: domain_info.pre_ret_bits,
+        hir_return_bits: domain_info.hir_ret_bits,
+        comparison_bits: cmp_bits,
+    };
+
+    let query = PreparedSymbolicQuery {
+        prehir_expr: prehir_result,
+        hir_expr: hir_result,
+        inequality,
+        correspondence,
+        assumptions: domain_info.assumptions,
+        param_specs: domain_info.param_specs,
+        domain_predicate: domain.map(|d| d.predicate.clone()),
+        explored_paths,
+        path_obligations: obligations,
+    };
+
+    solve_prepared_symbolic_query(prehir, hir, query)
+}
+
+fn solve_prepared_symbolic_query(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    query: PreparedSymbolicQuery,
+) -> SymbolicEquivalenceReport {
+    let mut solver = Solver::new();
+    let param_node_ids: Vec<_> = query
+        .param_specs
+        .iter()
+        .map(|spec| {
+            // Registers the Var's node so `get_value` can read a counterexample
+            // model back for it after a `Sat` result.
+            solver.register_node(spec.var.clone())
+        })
+        .collect();
+
+    if let Some(domain_pred) = &query.domain_predicate {
+        solver.assert(SymExpr::new_eq(domain_pred.clone(), bool_const(true)));
+    }
+
+    match &query.inequality {
+        PreparedInequality::DirectPair {
+            prehir_cmp,
+            hir_cmp,
+            ..
+        } => {
+            solver.assert(SymExpr::new_neq(prehir_cmp.clone(), hir_cmp.clone()));
+        }
+        PreparedInequality::SignedUnsignedPair { predicate, .. } => {
+            solver.assert(SymExpr::new_eq(predicate.clone(), bool_const(true)));
+        }
+    }
+
+    let result = match solver.check_sat() {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::debug!("lower_sym: solver error: {err}");
+            return unsupported_report(
+                Some(query.correspondence),
+                Some(query.path_obligations),
+                query.assumptions,
+                Vec::new(),
+                query.explored_paths,
+                Some(PATH_EXPLORE_BUDGET as u64),
+                UnsupportedReason::Construct("solver query failed"),
+                format!("solver query failed: {err}"),
+            );
+        }
+    };
+
+    match classify_solver_result(result) {
+        SolverVerdict::Equivalent => {
+            if let Some(reason) = incompatible_input_domain_reason(&query.correspondence) {
+                return inconclusive_report(
+                    Some(query.correspondence),
+                    Some(query.path_obligations),
+                    query.assumptions,
+                    Vec::new(),
+                    query.explored_paths,
+                    Some(PATH_EXPLORE_BUDGET as u64),
+                    reason,
+                );
+            }
+            let strength = if query.assumptions.is_empty() {
+                EvidenceStrength::Universal
+            } else {
+                EvidenceStrength::Conditional
+            };
+            let detail = format!(
+                "solver proved PreHIR and HIR return values equivalent across {} checked \
+                 parameter(s) under {:?} ({:?}; path obligations discharged over {} path(s))",
+                query.correspondence.params.len(),
+                query.correspondence.return_relation,
+                strength,
+                query.explored_paths
+            );
+            SymbolicEquivalenceReport {
+                outcome: SymbolicOutcome::Equivalent,
+                correspondence: Some(query.correspondence),
+                path_obligations: Some(query.path_obligations),
+                rejection_reason: None,
+                scope: symbolic_ast_return_scope(),
+                verdict: ValidationVerdict::Equivalent,
+                evidence: ValidationEvidence {
+                    strength,
+                    budget: ValidationBudget {
+                        max_paths: Some(PATH_EXPLORE_BUDGET as u64),
+                        ..ValidationBudget::default()
+                    },
+                    explored_paths: query.explored_paths,
+                    executed_traces: 0,
+                    assumptions: query.assumptions,
+                    unresolved_effects: Vec::new(),
+                    counterexample: None,
+                    detail,
+                },
+            }
+        }
+        SolverVerdict::Counterexample => {
+            validate_solver_witness_report(prehir, hir, &query, &param_node_ids, |id| {
+                solver.get_value(id)
+            })
+        }
+        SolverVerdict::Unknown => unsupported_report(
+            Some(query.correspondence),
+            Some(query.path_obligations),
+            query.assumptions,
+            Vec::new(),
+            query.explored_paths,
+            Some(PATH_EXPLORE_BUDGET as u64),
+            UnsupportedReason::Construct(
+                "solver returned Unknown -- should be rare/never with no memory theory engaged",
+            ),
+            "solver returned Unknown",
+        ),
+    }
+}
+
+/// Check whether `prehir` and `hir` compute the same return value for every
+/// input, for the symbolic tier's modeled subset (see [`crate::lower_sym`]'s
+/// scope notes -- acyclic, `Bool`/`Int` only, no `Div`/`Mod`).
+pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) -> SymbolicOutcome {
+    check_symbolic_equivalence_report(prehir, hir).outcome
+}
+
+/// Check symbolic equivalence under the default [`ReturnComparisonMode::LanguageValue`]
+/// and return the structured correspondence and assurance report.
+#[must_use]
+pub fn check_symbolic_equivalence_report(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+) -> SymbolicEquivalenceReport {
+    check_symbolic_equivalence_with_mode(prehir, hir, ReturnComparisonMode::LanguageValue)
+}
+
+/// Check symbolic equivalence under an explicit [`ReturnComparisonMode`],
+/// returning checked input correspondence, path obligations, assumptions, and
+/// assurance evidence.
+#[must_use]
+pub fn check_symbolic_equivalence_with_mode(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    return_mode: ReturnComparisonMode,
+) -> SymbolicEquivalenceReport {
+    check_symbolic_equivalence_with_options(
+        prehir,
+        hir,
+        SymbolicVerificationOptions {
+            return_mode,
+            ..SymbolicVerificationOptions::default()
+        },
+    )
+}
+
+/// Check symbolic equivalence under explicit verification options (overlap
+/// policy, leaf-check budgets, opt-in branch reachability, return mode).
+#[must_use]
+pub fn check_symbolic_equivalence_with_options(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    options: SymbolicVerificationOptions,
+) -> SymbolicEquivalenceReport {
+    check_symbolic_equivalence_with_domain(prehir, hir, options, |_| None)
+}
+
+/// Check symbolic equivalence under an explicit input-domain precondition built
+/// over the shared parameter symbolic variables (`param_vars`).
+#[must_use]
+pub fn check_symbolic_equivalence_with_domain<F>(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    options: SymbolicVerificationOptions,
+    build_domain: F,
+) -> SymbolicEquivalenceReport
+where
+    F: FnOnce(&[SymExpr]) -> Option<SymbolicDomainAssumption>,
+{
+    if lower_sym::prehir::contains_loop(&prehir.body) || lower_sym::hir::contains_loop(&hir.body) {
+        let reason = UnsupportedReason::ContainsLoop;
+        let detail = reason.to_string();
+        return unsupported_report(None, None, Vec::new(), Vec::new(), 0, None, reason, detail);
+    }
+
+    let domain_info = match prepare_input_domain(prehir, hir) {
+        Ok(info) => info,
+        Err(report) => return *report,
+    };
+
+    let domain = build_domain(&domain_info.param_vars);
+
+    let prehir_paths = match lower_sym::prehir::lower_paths_checked(
+        &prehir.body,
+        &prehir.params,
+        &prehir.locals,
+        &domain_info.param_vars,
+    ) {
+        Ok(paths) => paths,
+        Err(err) => {
+            return map_lowering_error("PreHIR", err, domain_info.assumptions, None, 0);
+        }
+    };
+    let hir_paths = match lower_sym::hir::lower_paths_checked(
+        &hir.body,
+        &hir.params,
+        &hir.locals,
+        &domain_info.param_vars,
+    ) {
+        Ok(paths) => paths,
+        Err(err) => {
+            return map_lowering_error(
+                "HIR",
+                err,
+                domain_info.assumptions,
+                None,
+                prehir_paths.leaves.len() as u64,
+            );
+        }
+    };
+
+    let mut runner = default_solver_sat;
+    evaluate_lowered_paths_with_runner(
+        prehir,
+        hir,
+        domain_info,
+        &prehir_paths,
+        &hir_paths,
+        options,
+        domain,
+        true,
+        &mut runner,
+    )
+}
+
+/// Verify equivalence directly from pre-lowered [`LoweredFunctionPaths`] built
+/// over the caller-supplied `param_vars` (shared across `prehir_paths`,
+/// `hir_paths`, and any `domain` predicate).
+#[must_use]
+pub fn check_lowered_paths_equivalence(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    prehir_paths: &LoweredFunctionPaths,
+    hir_paths: &LoweredFunctionPaths,
+    param_vars: &[SymExpr],
+    options: SymbolicVerificationOptions,
+    domain: Option<SymbolicDomainAssumption>,
+) -> SymbolicEquivalenceReport {
+    let mut domain_info = match prepare_input_domain(prehir, hir) {
+        Ok(info) => info,
+        Err(report) => return *report,
+    };
+
+    if param_vars.len() != domain_info.param_specs.len() {
+        return inconclusive_report(
+            None,
+            None,
+            domain_info.assumptions,
+            Vec::new(),
+            0,
+            None,
+            format!(
+                "supplied {} param var(s), expected {}",
+                param_vars.len(),
+                domain_info.param_specs.len()
+            ),
+        );
+    }
+
+    for (spec, supplied) in domain_info.param_specs.iter_mut().zip(param_vars) {
+        let SymExpr::Var { id, sort, .. } = supplied else {
+            return inconclusive_report(
+                None,
+                None,
+                domain_info.assumptions,
+                Vec::new(),
+                0,
+                None,
+                format!(
+                    "param var for '{}' must be a SymExpr::Var, got {:?}",
+                    spec.name, supplied
+                ),
+            );
+        };
+        if *sort != Sort::BitVector(spec.width_bits) {
+            return inconclusive_report(
+                None,
+                None,
+                domain_info.assumptions,
+                Vec::new(),
+                0,
+                None,
+                format!(
+                    "param var for '{}' has sort {:?}, expected BitVector({})",
+                    spec.name, sort, spec.width_bits
+                ),
+            );
+        }
+        spec.var = supplied.clone();
+        spec.var_id = *id;
+    }
+    domain_info.param_vars = param_vars.to_vec();
+
+    let mut runner = default_solver_sat;
+    evaluate_lowered_paths_with_runner(
+        prehir,
+        hir,
+        domain_info,
+        prehir_paths,
+        hir_paths,
+        options,
+        domain,
+        false,
+        &mut runner,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -952,127 +2253,6 @@ fn signed_label(signed: bool) -> &'static str {
     if signed { "signed" } else { "unsigned" }
 }
 
-/// Check whether `prehir` and `hir` compute the same return value for every
-/// input, for the symbolic tier's modeled subset (see [`crate::lower_sym`]'s
-/// scope notes -- acyclic, `Bool`/`Int` only, no `Div`/`Mod`).
-pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) -> SymbolicOutcome {
-    check_symbolic_equivalence_report(prehir, hir).outcome
-}
-
-/// Check symbolic equivalence under the default [`ReturnComparisonMode::LanguageValue`]
-/// and return the structured correspondence and assurance report.
-#[must_use]
-pub fn check_symbolic_equivalence_report(
-    prehir: &PreHirFunction,
-    hir: &HirFunction,
-) -> SymbolicEquivalenceReport {
-    check_symbolic_equivalence_with_mode(prehir, hir, ReturnComparisonMode::LanguageValue)
-}
-
-/// Check symbolic equivalence under an explicit [`ReturnComparisonMode`],
-/// returning checked input correspondence, assumptions, and assurance evidence.
-#[must_use]
-pub fn check_symbolic_equivalence_with_mode(
-    prehir: &PreHirFunction,
-    hir: &HirFunction,
-    return_mode: ReturnComparisonMode,
-) -> SymbolicEquivalenceReport {
-    let query = match prepare_symbolic_query(prehir, hir, return_mode) {
-        Ok(query) => query,
-        Err(report) => return *report,
-    };
-
-    let mut solver = Solver::new();
-    let param_node_ids: Vec<_> = query
-        .param_specs
-        .iter()
-        .map(|spec| {
-            // Registers the Var's node so `get_value` can read a counterexample
-            // model back for it after a `Sat` result.
-            solver.register_node(spec.var.clone())
-        })
-        .collect();
-
-    match &query.inequality {
-        PreparedInequality::DirectPair {
-            prehir_cmp,
-            hir_cmp,
-            ..
-        } => {
-            solver.assert(SymExpr::new_neq(prehir_cmp.clone(), hir_cmp.clone()));
-        }
-        PreparedInequality::SignedUnsignedPair { predicate, .. } => {
-            solver.assert(SymExpr::new_eq(
-                predicate.clone(),
-                SymExpr::Const { val: 1, size: 1 },
-            ));
-        }
-    }
-
-    let result = match solver.check_sat() {
-        Ok(result) => result,
-        Err(err) => {
-            tracing::debug!("lower_sym: solver error: {err}");
-            return unsupported_report(
-                Some(query.correspondence),
-                query.assumptions,
-                UnsupportedReason::Construct("solver query failed"),
-                format!("solver query failed: {err}"),
-            );
-        }
-    };
-
-    match classify_solver_result(result) {
-        SolverVerdict::Equivalent => {
-            if let Some(reason) = incompatible_input_domain_reason(&query.correspondence) {
-                return inconclusive_report(Some(query.correspondence), query.assumptions, reason);
-            }
-            let strength = if query.assumptions.is_empty() {
-                EvidenceStrength::Universal
-            } else {
-                EvidenceStrength::Conditional
-            };
-            let detail = format!(
-                "solver proved PreHIR and HIR return values equivalent across {} checked \
-                 parameter(s) under {:?} ({:?})",
-                query.correspondence.params.len(),
-                query.correspondence.return_relation,
-                strength
-            );
-            SymbolicEquivalenceReport {
-                outcome: SymbolicOutcome::Equivalent,
-                correspondence: Some(query.correspondence),
-                rejection_reason: None,
-                scope: symbolic_ast_return_scope(),
-                verdict: ValidationVerdict::Equivalent,
-                evidence: ValidationEvidence {
-                    strength,
-                    budget: ValidationBudget::default(),
-                    explored_paths: 0,
-                    executed_traces: 0,
-                    assumptions: query.assumptions,
-                    unresolved_effects: Vec::new(),
-                    counterexample: None,
-                    detail,
-                },
-            }
-        }
-        SolverVerdict::Counterexample => {
-            validate_solver_witness_report(prehir, hir, &query, &param_node_ids, |id| {
-                solver.get_value(id)
-            })
-        }
-        SolverVerdict::Unknown => unsupported_report(
-            Some(query.correspondence),
-            query.assumptions,
-            UnsupportedReason::Construct(
-                "solver returned Unknown -- should be rare/never with no memory theory engaged",
-            ),
-            "solver returned Unknown",
-        ),
-    }
-}
-
 fn incompatible_input_domain_reason(corr: &SymbolicInputCorrespondence) -> Option<String> {
     let mismatched: Vec<String> = corr
         .params
@@ -1112,6 +2292,18 @@ fn validate_solver_witness_report<F>(
 where
     F: FnMut(SymNodeId) -> Option<u64>,
 {
+    let witness_inconclusive = |reason: String| {
+        inconclusive_report(
+            Some(query.correspondence.clone()),
+            Some(query.path_obligations.clone()),
+            query.assumptions.clone(),
+            Vec::new(),
+            query.explored_paths,
+            Some(PATH_EXPLORE_BUDGET as u64),
+            reason,
+        )
+    };
+
     let mut referenced_vars = HashSet::new();
     let mut collect = |expr: &SymExpr| {
         if let SymExpr::Var { id, .. } = expr {
@@ -1120,6 +2312,9 @@ where
     };
     query.prehir_expr.visit_preorder(&mut collect);
     query.hir_expr.visit_preorder(&mut collect);
+    if let Some(domain_pred) = &query.domain_predicate {
+        domain_pred.visit_preorder(&mut collect);
+    }
 
     let mut args = Vec::with_capacity(query.param_specs.len());
     let mut arg_widths = Vec::with_capacity(query.param_specs.len());
@@ -1129,29 +2324,21 @@ where
         let val = match model_value(node_id) {
             Some(raw) => {
                 if !fits_bits(raw, spec.width_bits) {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        format!(
-                            "solver returned out-of-width model value 0x{raw:x} for {}-bit \
-                             parameter '{}'",
-                            spec.width_bits, spec.name
-                        ),
-                    );
+                    return witness_inconclusive(format!(
+                        "solver returned out-of-width model value 0x{raw:x} for {}-bit \
+                         parameter '{}'",
+                        spec.width_bits, spec.name
+                    ));
                 }
                 raw
             }
             None => {
                 if referenced_vars.contains(&spec.var_id) {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        format!(
-                            "solver returned incomplete model: missing value for constrained \
-                             parameter '{}'",
-                            spec.name
-                        ),
-                    );
+                    return witness_inconclusive(format!(
+                        "solver returned incomplete model: missing value for constrained \
+                         parameter '{}'",
+                        spec.name
+                    ));
                 }
                 // Parameter does not appear in either lowered return expression:
                 // explicitly complete the free input with a width-valid zero.
@@ -1161,6 +2348,18 @@ where
         args.push(val);
         arg_widths.push(spec.width_bits);
         env.insert(spec.var_id, val);
+    }
+
+    if let Some(domain_pred) = &query.domain_predicate {
+        match eval_sym_bv(domain_pred, &env) {
+            Ok(0) => {
+                return witness_inconclusive(format!(
+                    "solver candidate {args:?} violates assumed domain precondition"
+                ));
+            }
+            Ok(_) => {}
+            Err(reason) => return witness_inconclusive(reason),
+        }
     }
 
     // 1. Confirm the candidate tuple actually satisfies the configured return
@@ -1173,23 +2372,11 @@ where
         } => {
             let pre_sym = match eval_sym_bv(prehir_cmp, &env) {
                 Ok(v) => v,
-                Err(reason) => {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        reason,
-                    );
-                }
+                Err(reason) => return witness_inconclusive(reason),
             };
             let hir_sym = match eval_sym_bv(hir_cmp, &env) {
                 Ok(v) => v,
-                Err(reason) => {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        reason,
-                    );
-                }
+                Err(reason) => return witness_inconclusive(reason),
             };
             (
                 format!("0x{pre_sym:x}"),
@@ -1204,33 +2391,15 @@ where
         } => {
             let pred_val = match eval_sym_bv(predicate, &env) {
                 Ok(v) => v,
-                Err(reason) => {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        reason,
-                    );
-                }
+                Err(reason) => return witness_inconclusive(reason),
             };
             let pre_sym = match eval_sym_bv(prehir_expr, &env) {
                 Ok(v) => v,
-                Err(reason) => {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        reason,
-                    );
-                }
+                Err(reason) => return witness_inconclusive(reason),
             };
             let hir_sym = match eval_sym_bv(hir_expr, &env) {
                 Ok(v) => v,
-                Err(reason) => {
-                    return inconclusive_report(
-                        Some(query.correspondence.clone()),
-                        query.assumptions.clone(),
-                        reason,
-                    );
-                }
+                Err(reason) => return witness_inconclusive(reason),
             };
             let pre_val = as_math_int(
                 pre_sym,
@@ -1257,14 +2426,10 @@ where
     };
 
     if !sym_diverges {
-        return inconclusive_report(
-            Some(query.correspondence.clone()),
-            query.assumptions.clone(),
-            format!(
-                "solver counterexample {:?} does not satisfy PreHIR != HIR (PreHIR={}, HIR={})",
-                args, pre_sym_obs, hir_sym_obs
-            ),
-        );
+        return witness_inconclusive(format!(
+            "solver counterexample {:?} does not satisfy PreHIR != HIR (PreHIR={}, HIR={})",
+            args, pre_sym_obs, hir_sym_obs
+        ));
     }
 
     // 2. Independently replay the concrete tuple against the PreHIR/HIR
@@ -1281,15 +2446,11 @@ where
                 query.correspondence.return_relation,
             );
             if !replay_diverges {
-                return inconclusive_report(
-                    Some(query.correspondence.clone()),
-                    query.assumptions.clone(),
-                    format!(
-                        "concrete PreHIR/HIR replay agreed on candidate {:?} \
-                         (PreHIR={pre_obs}, HIR={hir_obs})",
-                        args
-                    ),
-                );
+                return witness_inconclusive(format!(
+                    "concrete PreHIR/HIR replay agreed on candidate {:?} \
+                     (PreHIR={pre_obs}, HIR={hir_obs})",
+                    args
+                ));
             }
             let inputs: Vec<(String, u64)> = query
                 .param_specs
@@ -1304,13 +2465,17 @@ where
             SymbolicEquivalenceReport {
                 outcome: SymbolicOutcome::Diverged(Counterexample { args, arg_widths }),
                 correspondence: Some(query.correspondence.clone()),
+                path_obligations: Some(query.path_obligations.clone()),
                 rejection_reason: None,
                 scope: symbolic_ast_return_scope(),
                 verdict: ValidationVerdict::Counterexample,
                 evidence: ValidationEvidence {
                     strength: EvidenceStrength::None,
-                    budget: ValidationBudget::default(),
-                    explored_paths: 0,
+                    budget: ValidationBudget {
+                        max_paths: Some(PATH_EXPLORE_BUDGET as u64),
+                        ..ValidationBudget::default()
+                    },
+                    explored_paths: query.explored_paths,
                     executed_traces: 0,
                     assumptions: query.assumptions.clone(),
                     unresolved_effects: Vec::new(),
@@ -1323,16 +2488,12 @@ where
                 },
             }
         }
-        (Ok(None), _) | (_, Ok(None)) => inconclusive_report(
-            Some(query.correspondence.clone()),
-            query.assumptions.clone(),
-            "concrete replay returned without a value on solver candidate",
+        (Ok(None), _) | (_, Ok(None)) => witness_inconclusive(
+            "concrete replay returned without a value on solver candidate".into(),
         ),
-        (Err(err), _) | (_, Err(err)) => inconclusive_report(
-            Some(query.correspondence.clone()),
-            query.assumptions.clone(),
-            format!("concrete replay failed on solver candidate: {err}"),
-        ),
+        (Err(err), _) | (_, Err(err)) => {
+            witness_inconclusive(format!("concrete replay failed on solver candidate: {err}"))
+        }
     }
 }
 
@@ -1816,13 +2977,113 @@ mod tests {
         assert_eq!(ce.arg_widths, vec![32]);
     }
 
+    fn prepare_symbolic_query(
+        prehir: &fission_midend_prehir::PreHirFunction,
+        hir: &fission_midend_core::ir::HirFunction,
+        return_mode: super::ReturnComparisonMode,
+    ) -> Result<super::PreparedSymbolicQuery, Box<super::SymbolicEquivalenceReport>> {
+        let mut domain_info = super::prepare_input_domain(prehir, hir)?;
+        let pre_paths = crate::lower_sym::prehir::lower_paths_checked(
+            &prehir.body,
+            &prehir.params,
+            &prehir.locals,
+            &domain_info.param_vars,
+        )
+        .map_err(|err| {
+            Box::new(super::map_lowering_error(
+                "PreHIR",
+                err,
+                domain_info.assumptions.clone(),
+                None,
+                0,
+            ))
+        })?;
+        let hir_paths = crate::lower_sym::hir::lower_paths_checked(
+            &hir.body,
+            &hir.params,
+            &hir.locals,
+            &domain_info.param_vars,
+        )
+        .map_err(|err| {
+            Box::new(super::map_lowering_error(
+                "HIR",
+                err,
+                domain_info.assumptions.clone(),
+                None,
+                pre_paths.leaves.len() as u64,
+            ))
+        })?;
+        let prehir_expr = pre_paths.fold_return_ite().map_err(|err| {
+            Box::new(super::map_lowering_error(
+                "PreHIR",
+                err,
+                domain_info.assumptions.clone(),
+                None,
+                0,
+            ))
+        })?;
+        let hir_expr = hir_paths.fold_return_ite().map_err(|err| {
+            Box::new(super::map_lowering_error(
+                "HIR",
+                err,
+                domain_info.assumptions.clone(),
+                None,
+                0,
+            ))
+        })?;
+        let options = super::SymbolicVerificationOptions {
+            return_mode,
+            ..super::SymbolicVerificationOptions::default()
+        };
+        let pre_rep = super::check_side_path_obligations("PreHIR", &pre_paths, None, options);
+        let hir_rep = super::check_side_path_obligations("HIR", &hir_paths, None, options);
+        let pre_bits = super::checked_sym_bits(&prehir_expr, domain_info.assumptions.clone())?;
+        let hir_bits = super::checked_sym_bits(&hir_expr, domain_info.assumptions.clone())?;
+        let (return_relation, cmp_bits, inequality) = super::build_return_inequality(
+            prehir_expr.clone(),
+            hir_expr.clone(),
+            pre_bits,
+            domain_info.pre_ret_bits,
+            domain_info.pre_ret_signed,
+            hir_bits,
+            domain_info.hir_ret_bits,
+            domain_info.hir_ret_signed,
+            return_mode,
+            &mut domain_info.assumptions,
+        )?;
+        let explored_paths = (pre_paths.leaves.len() + hir_paths.leaves.len()) as u64;
+        Ok(super::PreparedSymbolicQuery {
+            prehir_expr,
+            hir_expr,
+            inequality,
+            correspondence: super::SymbolicInputCorrespondence {
+                params: domain_info.param_correspondences,
+                return_mode,
+                return_relation,
+                prehir_return_type: domain_info.prehir_return_type,
+                hir_return_type: domain_info.hir_return_type,
+                prehir_return_bits: domain_info.pre_ret_bits,
+                hir_return_bits: domain_info.hir_ret_bits,
+                comparison_bits: cmp_bits,
+            },
+            assumptions: domain_info.assumptions,
+            param_specs: domain_info.param_specs,
+            domain_predicate: None,
+            explored_paths,
+            path_obligations: super::SymbolicPathObligationReport {
+                domain_non_vacuity: super::ObligationStatus::DischargedByConstruction,
+                domain_kind: super::DomainNonVacuityStatus::UnconstrainedNonEmpty,
+                prehir: pre_rep,
+                hir: hir_rep,
+                all_required_discharged: true,
+            },
+        })
+    }
+
     #[test]
     fn constrained_missing_and_invalid_models_become_inconclusive_while_free_params_zero_complete()
     {
-        use super::{
-            ReturnComparisonMode, SymbolicOutcome, prepare_symbolic_query,
-            validate_solver_witness_report,
-        };
+        use super::{ReturnComparisonMode, SymbolicOutcome, validate_solver_witness_report};
         use fission_midend_core::ir::{HirExpr, HirFunction, HirStmt, NirBinding};
         use fission_midend_prehir::{
             PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirFunction, PreHirStmt,
@@ -3053,5 +4314,126 @@ mod tests {
                 .verdict(),
             ValidationVerdict::Unsupported
         );
+    }
+
+    #[test]
+    fn unknown_obligation_never_discharges_or_claims_equivalence() {
+        use super::{
+            ObligationStatus, OverlapPolicy, SymbolicDomainAssumption, SymbolicVerificationOptions,
+            evaluate_lowered_paths_with_runner, prepare_input_domain,
+        };
+        use crate::lower_sym::{
+            LoweredFunctionPaths, PATH_EXPLORE_BUDGET, SymbolicExitKind, SymbolicPathLeaf,
+        };
+        use crate::product::ValidationVerdict;
+        use fission_midend_core::ir::{HirExpr, HirFunction, HirStmt, NirBinding};
+        use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirStmt};
+
+        let i4 = int(4, true);
+        let pre = PreHirFunction {
+            return_type: i4.clone(),
+            params: vec![PreHirBinding {
+                name: "x".to_string(),
+                ty: i4.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string())))],
+            ..Default::default()
+        };
+        let hir = HirFunction {
+            return_type: i4.clone(),
+            params: vec![NirBinding {
+                name: "x".to_string(),
+                ty: i4,
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![HirStmt::Return(Some(HirExpr::Var("x".to_string())))],
+            ..Default::default()
+        };
+
+        // Call index 0 = domain non-vacuity, 1 = prehir coverage, 2 = prehir exclusivity,
+        // 3 = prehir overlap consistency. Inject `SatResult::Unknown` at each step in turn.
+        for unknown_call in [0usize, 1, 2, 3] {
+            let domain_info = prepare_input_domain(&pre, &hir).expect("input domain");
+            let x = domain_info.param_vars[0].clone();
+            let cond_true = SymExpr::Const { val: 1, size: 1 };
+            let mut paths = LoweredFunctionPaths {
+                leaves: vec![SymbolicPathLeaf {
+                    path_cond: cond_true.clone(),
+                    exit: SymbolicExitKind::ReturnValue(x.clone()),
+                }],
+                explored_steps: 1,
+                budget_limit: PATH_EXPLORE_BUDGET,
+                return_bits: Some(4),
+            };
+            if unknown_call == 3 {
+                // Force `overlap` SAT on query 2 so query 3 (overlap consistency) runs.
+                paths.leaves.push(SymbolicPathLeaf {
+                    path_cond: cond_true.clone(),
+                    exit: SymbolicExitKind::ReturnValue(x.clone()),
+                });
+            }
+            let dom = SymbolicDomainAssumption {
+                predicate: cond_true,
+                description: "true".to_string(),
+            };
+            let mut calls = 0usize;
+            let mut runner = |expr: &SymExpr| -> Result<SatResult, String> {
+                let idx = calls;
+                calls += 1;
+                if idx == unknown_call {
+                    Ok(SatResult::Unknown)
+                } else if idx == 2 && unknown_call == 3 {
+                    Ok(SatResult::Sat)
+                } else {
+                    super::default_solver_sat(expr)
+                }
+            };
+            let options = SymbolicVerificationOptions {
+                overlap_policy: OverlapPolicy::AllowConsistentOverlap,
+                ..SymbolicVerificationOptions::default()
+            };
+            let report = evaluate_lowered_paths_with_runner(
+                &pre,
+                &hir,
+                domain_info,
+                &paths,
+                &paths,
+                options,
+                Some(dom),
+                false,
+                &mut runner,
+            );
+            assert_eq!(
+                report.verdict,
+                ValidationVerdict::Inconclusive,
+                "unknown on query {unknown_call} must stay Inconclusive"
+            );
+            let oblig = report.path_obligations.expect("path obligations present");
+            assert!(!oblig.all_required_discharged);
+            match unknown_call {
+                0 => assert!(matches!(
+                    oblig.domain_non_vacuity,
+                    ObligationStatus::Unknown { .. }
+                )),
+                1 => assert!(matches!(
+                    oblig.prehir.path_coverage,
+                    ObligationStatus::Unknown { .. }
+                )),
+                2 => assert!(matches!(
+                    oblig.prehir.path_exclusivity,
+                    ObligationStatus::Unknown { .. }
+                )),
+                3 => assert!(matches!(
+                    oblig.prehir.overlap_value_consistency,
+                    Some(ObligationStatus::Unknown { .. })
+                )),
+                _ => unreachable!(),
+            }
+        }
     }
 }

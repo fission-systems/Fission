@@ -63,19 +63,28 @@ use std::fmt;
 use fission_midend_core::ir::NirType;
 
 /// Structured lowering failure distinguishing unsupported IR types from
-/// invalid variable/parameter bindings and unsupported control/op constructs.
+/// invalid variable/parameter bindings, cyclic control flow, budget exhaustion,
+/// and unsupported control/op constructs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LowerSymError {
     UnsupportedType(&'static str),
     InvalidBinding(String),
     UnsupportedConstruct(String),
+    CyclicControlFlow(String),
+    BudgetExceeded { steps: usize, limit: usize },
 }
 
 impl fmt::Display for LowerSymError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedType(msg) => write!(f, "lower_sym: {msg}"),
-            Self::InvalidBinding(msg) | Self::UnsupportedConstruct(msg) => f.write_str(msg),
+            Self::InvalidBinding(msg)
+            | Self::UnsupportedConstruct(msg)
+            | Self::CyclicControlFlow(msg) => f.write_str(msg),
+            Self::BudgetExceeded { steps, limit } => write!(
+                f,
+                "lower_sym: path-exploration budget exceeded ({steps} > {limit} steps)"
+            ),
         }
     }
 }
@@ -108,12 +117,147 @@ pub(crate) fn checked_scalar_width(ty: &NirType) -> std::result::Result<u32, &'s
 /// pathological branch-count blowup (2^branches paths) the same way
 /// `SESE_REGION_PROOF_BUDGET_CALLS` guards structuring's own region-proof
 /// search: a call-count budget, not a wall-clock one.
-const PATH_EXPLORE_BUDGET: usize = 4096;
+pub const PATH_EXPLORE_BUDGET: usize = 4096;
+
+/// How control left an explored symbolic path prior to ITE folding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SymbolicExitKind {
+    /// Normal value-returning `Return(Some(expr))`.
+    ReturnValue(SymExpr),
+    /// Void `Return(None)` without a modeled return value.
+    VoidReturn,
+    /// Control fell off the end of a body without returning.
+    Fallthrough,
+    /// `Goto(label)` whose target label does not exist in scope.
+    UnresolvedGoto(String),
+    /// `Goto` revisited a label already active along this path (goto cycle).
+    CyclicGoto(String),
+    /// Call to a non-returning callee reached on this path (not total value return).
+    NonReturning(String),
+    /// Path reached a modeled trap/fault rather than returning cleanly.
+    Fault(String),
+    /// Path reached an unmodeled construct instead of returning cleanly.
+    Unsupported(String),
+}
+
+/// One symbolically explored execution path before folding into a closed-form ITE.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolicPathLeaf {
+    pub path_cond: SymExpr,
+    pub exit: SymbolicExitKind,
+}
+
+/// Pre-ITE lowered path set for one function body, preserving all path predicates
+/// and exit kinds so coverage, exclusivity, and exit completeness can be checked
+/// explicitly prior to equivalence solving.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweredFunctionPaths {
+    pub leaves: Vec<SymbolicPathLeaf>,
+    pub explored_steps: usize,
+    pub budget_limit: usize,
+    pub return_bits: Option<u32>,
+}
+
+impl LoweredFunctionPaths {
+    /// Return all leaves that terminate with a scalar `ReturnValue`.
+    #[must_use]
+    pub fn return_leaves(&self) -> Vec<(&SymExpr, &SymExpr)> {
+        self.leaves
+            .iter()
+            .filter_map(|leaf| match &leaf.exit {
+                SymbolicExitKind::ReturnValue(val) => Some((&leaf.path_cond, val)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Return all leaves that do not terminate with a scalar `ReturnValue`.
+    #[must_use]
+    pub fn non_return_leaves(&self) -> Vec<&SymbolicPathLeaf> {
+        self.leaves
+            .iter()
+            .filter(|leaf| !matches!(leaf.exit, SymbolicExitKind::ReturnValue(_)))
+            .collect()
+    }
+
+    /// True if any path ended in fallthrough, void return, goto cycle,
+    /// unresolved goto, fault, non-returning call, or unmodeled exit.
+    #[must_use]
+    pub fn has_non_return_leaves(&self) -> bool {
+        self.leaves
+            .iter()
+            .any(|leaf| !matches!(leaf.exit, SymbolicExitKind::ReturnValue(_)))
+    }
+
+    /// Fold return leaves into a single right-nested ITE once exit completeness
+    /// and width consistency hold.
+    pub(crate) fn fold_return_ite(&self) -> std::result::Result<SymExpr, LowerSymError> {
+        if let Some(label) = self.leaves.iter().find_map(|leaf| match &leaf.exit {
+            SymbolicExitKind::CyclicGoto(label) => Some(label),
+            _ => None,
+        }) {
+            return Err(LowerSymError::CyclicControlFlow(format!(
+                "lower_sym: cyclic goto control flow detected at label '{label}'"
+            )));
+        }
+        if let Some(label) = self.leaves.iter().find_map(|leaf| match &leaf.exit {
+            SymbolicExitKind::UnresolvedGoto(label) => Some(label),
+            _ => None,
+        }) {
+            return Err(LowerSymError::UnsupportedConstruct(format!(
+                "lower_sym: goto '{label}' never resolved to a label in this function"
+            )));
+        }
+        if let Some(msg) = self.leaves.iter().find_map(|leaf| match &leaf.exit {
+            SymbolicExitKind::NonReturning(msg)
+            | SymbolicExitKind::Fault(msg)
+            | SymbolicExitKind::Unsupported(msg) => Some(msg),
+            _ => None,
+        }) {
+            return Err(LowerSymError::UnsupportedConstruct(msg.clone()));
+        }
+
+        let return_leaves = self.return_leaves();
+        if return_leaves.is_empty() {
+            return Err(LowerSymError::UnsupportedConstruct(
+                "lower_sym: no path through the function returns a value".to_string(),
+            ));
+        }
+        if self.has_non_return_leaves() {
+            return Err(LowerSymError::UnsupportedConstruct(
+                "lower_sym: function has incomplete return paths (fallthrough or void return)"
+                    .to_string(),
+            ));
+        }
+
+        let mut iter = return_leaves.into_iter().rev();
+        let (_, first_val) = iter.next().expect("non-empty return_leaves");
+        let mut acc = first_val.clone();
+        let ret_bits = first_val.get_bit_width();
+        for (cond, value) in iter {
+            let branch_bits = value.get_bit_width();
+            if branch_bits != ret_bits {
+                return Err(LowerSymError::UnsupportedConstruct(format!(
+                    "lower_sym: return branches produce mismatched widths ({branch_bits}-bit vs {ret_bits}-bit)"
+                )));
+            }
+            acc = SymExpr::Ite {
+                cond: Box::new(cond.clone()),
+                t: Box::new(value.clone()),
+                f: Box::new(acc),
+            };
+        }
+        Ok(acc)
+    }
+}
+
+type LabelVisitKey = (usize, usize);
 
 enum LeafKind {
     Return(Option<SymExpr>),
-    Fallthrough(SymEnv),
-    UnresolvedGoto(String, SymEnv),
+    Fallthrough(SymEnv, Vec<LabelVisitKey>),
+    UnresolvedGoto(String, SymEnv, Vec<LabelVisitKey>),
+    CyclicGoto(String),
 }
 
 struct Leaf {
@@ -229,7 +373,8 @@ macro_rules! define_lower_sym {
             use fission_solver::ast::{Sort, SymExpr};
 
             use super::{
-                Leaf, LeafKind, LowerSymError, PATH_EXPLORE_BUDGET, SymEnv, and,
+                LabelVisitKey, Leaf, LeafKind, LowerSymError, LoweredFunctionPaths,
+                PATH_EXPLORE_BUDGET, SymEnv, SymbolicExitKind, SymbolicPathLeaf, and,
                 checked_scalar_type, checked_scalar_width, resize, sym_const,
             };
             use crate::scalar_semantics::{ShiftKind, shift_sym};
@@ -533,28 +678,43 @@ macro_rules! define_lower_sym {
             /// Explore every path through `stmts[start..]` under `path_cond`
             /// starting from `env`, returning one [`Leaf`] per way control
             /// can leave this call (a `Return`, a `Goto` this list's own
-            /// scope can't resolve, or falling off the end).
+            /// scope can't resolve, a revisited-label `CyclicGoto`, or
+            /// falling off the end).
             fn exec_from(
                 stmts: &[$Stmt],
                 start: usize,
                 path_cond: SymExpr,
                 env: SymEnv,
+                mut visited_labels: Vec<LabelVisitKey>,
                 budget: &mut usize,
             ) -> LowerResult<Vec<Leaf>> {
                 *budget += 1;
                 if *budget > PATH_EXPLORE_BUDGET {
-                    return Err(LowerSymError::UnsupportedConstruct(
-                        "lower_sym: path-exploration budget exceeded (too many branches)".to_string(),
-                    ));
+                    return Err(LowerSymError::BudgetExceeded {
+                        steps: *budget,
+                        limit: PATH_EXPLORE_BUDGET,
+                    });
                 }
+                let list_key = stmts.as_ptr() as usize;
                 let mut idx = start;
                 let mut env = env;
                 loop {
                     if idx >= stmts.len() {
-                        return Ok(vec![Leaf { path_cond, kind: LeafKind::Fallthrough(env) }]);
+                        return Ok(vec![Leaf {
+                            path_cond,
+                            kind: LeafKind::Fallthrough(env, visited_labels),
+                        }]);
                     }
                     match &stmts[idx] {
-                        $Stmt::Label(_) => {
+                        $Stmt::Label(label) => {
+                            let key = (list_key, idx);
+                            if visited_labels.contains(&key) {
+                                return Ok(vec![Leaf {
+                                    path_cond,
+                                    kind: LeafKind::CyclicGoto(label.clone()),
+                                }]);
+                            }
+                            visited_labels.push(key);
                             idx += 1;
                         }
                         $Stmt::Assign { lhs, rhs } => {
@@ -587,10 +747,32 @@ macro_rules! define_lower_sym {
                         }
                         $Stmt::Goto(label) => {
                             return Ok(match find_label(stmts, label) {
-                                Some(target) => exec_from(stmts, target + 1, path_cond, env, budget)?,
+                                Some(target) => {
+                                    let key = (list_key, target);
+                                    if visited_labels.contains(&key) {
+                                        vec![Leaf {
+                                            path_cond,
+                                            kind: LeafKind::CyclicGoto(label.clone()),
+                                        }]
+                                    } else {
+                                        visited_labels.push(key);
+                                        exec_from(
+                                            stmts,
+                                            target + 1,
+                                            path_cond,
+                                            env,
+                                            visited_labels,
+                                            budget,
+                                        )?
+                                    }
+                                }
                                 None => vec![Leaf {
                                     path_cond,
-                                    kind: LeafKind::UnresolvedGoto(label.clone(), env),
+                                    kind: LeafKind::UnresolvedGoto(
+                                        label.clone(),
+                                        env,
+                                        visited_labels,
+                                    ),
                                 }],
                             });
                         }
@@ -599,10 +781,20 @@ macro_rules! define_lower_sym {
                             let is_true = truth(c)?;
                             let is_false = SymExpr::new_not(is_true.clone());
                             let then_leaves = exec_from(
-                                then_body, 0, and(path_cond.clone(), is_true), env.clone(), budget,
+                                then_body,
+                                0,
+                                and(path_cond.clone(), is_true),
+                                env.clone(),
+                                visited_labels.clone(),
+                                budget,
                             )?;
                             let else_leaves = exec_from(
-                                else_body, 0, and(path_cond.clone(), is_false), env.clone(), budget,
+                                else_body,
+                                0,
+                                and(path_cond.clone(), is_false),
+                                env,
+                                visited_labels,
+                                budget,
                             )?;
                             let mut out = Vec::new();
                             for leaf in then_leaves.into_iter().chain(else_leaves) {
@@ -611,7 +803,14 @@ macro_rules! define_lower_sym {
                             return Ok(out);
                         }
                         $Stmt::Block(inner) => {
-                            let inner_leaves = exec_from(inner, 0, path_cond.clone(), env.clone(), budget)?;
+                            let inner_leaves = exec_from(
+                                inner,
+                                0,
+                                path_cond.clone(),
+                                env,
+                                visited_labels,
+                                budget,
+                            )?;
                             let mut out = Vec::new();
                             for leaf in inner_leaves {
                                 out.extend(continue_leaf(stmts, idx + 1, leaf, budget)?);
@@ -643,10 +842,11 @@ macro_rules! define_lower_sym {
             }
 
             /// Resolve one leaf from a nested (`If`/`Block`) scope against
-            /// the *enclosing* `stmts` list: a `Return` is terminal as-is;
-            /// a `Fallthrough`/unresolved `Goto` continues processing
-            /// `stmts` from `resume_idx` (or from the found label) using
-            /// that leaf's own environment and accumulated path condition.
+            /// the *enclosing* `stmts` list: a `Return` or `CyclicGoto` is
+            /// terminal as-is; a `Fallthrough`/unresolved `Goto` continues
+            /// processing `stmts` from `resume_idx` (or from the found label)
+            /// using that leaf's own environment, visited-label set, and
+            /// accumulated path condition.
             fn continue_leaf(
                 stmts: &[$Stmt],
                 resume_idx: usize,
@@ -654,24 +854,52 @@ macro_rules! define_lower_sym {
                 budget: &mut usize,
             ) -> LowerResult<Vec<Leaf>> {
                 match leaf.kind {
-                    LeafKind::Return(v) => Ok(vec![Leaf { path_cond: leaf.path_cond, kind: LeafKind::Return(v) }]),
-                    LeafKind::Fallthrough(env) => exec_from(stmts, resume_idx, leaf.path_cond, env, budget),
-                    LeafKind::UnresolvedGoto(label, env) => match find_label(stmts, &label) {
-                        Some(target) => exec_from(stmts, target + 1, leaf.path_cond, env, budget),
-                        None => Ok(vec![Leaf {
-                            path_cond: leaf.path_cond,
-                            kind: LeafKind::UnresolvedGoto(label, env),
-                        }]),
-                    },
+                    LeafKind::Return(v) => {
+                        Ok(vec![Leaf { path_cond: leaf.path_cond, kind: LeafKind::Return(v) }])
+                    }
+                    LeafKind::CyclicGoto(label) => Ok(vec![Leaf {
+                        path_cond: leaf.path_cond,
+                        kind: LeafKind::CyclicGoto(label),
+                    }]),
+                    LeafKind::Fallthrough(env, visited_labels) => {
+                        exec_from(stmts, resume_idx, leaf.path_cond, env, visited_labels, budget)
+                    }
+                    LeafKind::UnresolvedGoto(label, env, mut visited_labels) => {
+                        match find_label(stmts, &label) {
+                            Some(target) => {
+                                let key = (stmts.as_ptr() as usize, target);
+                                if visited_labels.contains(&key) {
+                                    Ok(vec![Leaf {
+                                        path_cond: leaf.path_cond,
+                                        kind: LeafKind::CyclicGoto(label),
+                                    }])
+                                } else {
+                                    visited_labels.push(key);
+                                    exec_from(
+                                        stmts,
+                                        target + 1,
+                                        leaf.path_cond,
+                                        env,
+                                        visited_labels,
+                                        budget,
+                                    )
+                                }
+                            }
+                            None => Ok(vec![Leaf {
+                                path_cond: leaf.path_cond,
+                                kind: LeafKind::UnresolvedGoto(label, env, visited_labels),
+                            }]),
+                        }
+                    }
                 }
             }
 
-            pub(crate) fn lower_checked(
+            pub(crate) fn lower_paths_checked(
                 body: &[$Stmt],
                 params: &[$Binding],
                 locals: &[$Binding],
                 param_vars: &[SymExpr],
-            ) -> LowerResult<SymExpr> {
+            ) -> LowerResult<LoweredFunctionPaths> {
                 if param_vars.len() != params.len() {
                     return Err(LowerSymError::InvalidBinding(format!(
                         "lower_sym: {} param vars given, function has {} params",
@@ -746,53 +974,71 @@ macro_rules! define_lower_sym {
                 }
 
                 let mut budget = 0usize;
-                let leaves = exec_from(body, 0, SymExpr::Const { val: 1, size: 1 }, env, &mut budget)?;
+                let raw_leaves = exec_from(
+                    body,
+                    0,
+                    SymExpr::Const { val: 1, size: 1 },
+                    env,
+                    Vec::new(),
+                    &mut budget,
+                )?;
 
-                let mut return_leaves: Vec<(SymExpr, SymExpr)> = Vec::new();
-                let mut has_incomplete_return = false;
-                for leaf in leaves {
-                    match leaf.kind {
+                let mut leaves = Vec::with_capacity(raw_leaves.len());
+                let mut return_bits = None;
+                for leaf in raw_leaves {
+                    let exit = match leaf.kind {
                         LeafKind::Return(Some(v)) => {
-                            return_leaves.push((leaf.path_cond, v));
+                            let width = bit_width(&v)?;
+                            if let Some(expected) = return_bits {
+                                if expected != width {
+                                    return Err(LowerSymError::UnsupportedConstruct(format!(
+                                        "lower_sym: return branches produce mismatched widths ({width}-bit vs {expected}-bit)"
+                                    )));
+                                }
+                            } else {
+                                return_bits = Some(width);
+                            }
+                            SymbolicExitKind::ReturnValue(v)
                         }
-                        LeafKind::Fallthrough(_) | LeafKind::Return(None) => {
-                            has_incomplete_return = true;
+                        LeafKind::Return(None) => SymbolicExitKind::VoidReturn,
+                        LeafKind::Fallthrough(_, _) => SymbolicExitKind::Fallthrough,
+                        LeafKind::UnresolvedGoto(label, _, _) => {
+                            SymbolicExitKind::UnresolvedGoto(label)
                         }
-                        LeafKind::UnresolvedGoto(label, _) => {
-                            return Err(LowerSymError::UnsupportedConstruct(format!(
-                                "lower_sym: goto '{label}' never resolved to a label in this function"
-                            )));
-                        }
-                    }
-                }
-                if return_leaves.is_empty() {
-                    return Err(LowerSymError::UnsupportedConstruct(
-                        "lower_sym: no path through the function returns a value".to_string(),
-                    ));
-                }
-                if has_incomplete_return {
-                    return Err(LowerSymError::UnsupportedConstruct(
-                        "lower_sym: function has incomplete return paths (fallthrough or void return)"
-                            .to_string(),
-                    ));
-                }
-                let mut iter = return_leaves.into_iter().rev();
-                let (_, mut acc) = iter.next().expect("non-empty return_leaves");
-                let ret_bits = bit_width(&acc)?;
-                for (cond, value) in iter {
-                    let branch_bits = bit_width(&value)?;
-                    if branch_bits != ret_bits {
-                        return Err(LowerSymError::UnsupportedConstruct(format!(
-                            "lower_sym: return branches produce mismatched widths ({branch_bits}-bit vs {ret_bits}-bit)"
-                        )));
-                    }
-                    acc = SymExpr::Ite {
-                        cond: Box::new(cond),
-                        t: Box::new(value),
-                        f: Box::new(acc),
+                        LeafKind::CyclicGoto(label) => SymbolicExitKind::CyclicGoto(label),
                     };
+                    leaves.push(SymbolicPathLeaf {
+                        path_cond: leaf.path_cond,
+                        exit,
+                    });
                 }
-                Ok(acc)
+
+                Ok(LoweredFunctionPaths {
+                    leaves,
+                    explored_steps: budget,
+                    budget_limit: PATH_EXPLORE_BUDGET,
+                    return_bits,
+                })
+            }
+
+            /// Public entrypoint exposing pre-ITE symbolic leaves (`path_cond`
+            /// and exit kinds) for external callers and tests.
+            pub fn lower_paths(
+                body: &[$Stmt],
+                params: &[$Binding],
+                locals: &[$Binding],
+                param_vars: &[SymExpr],
+            ) -> anyhow::Result<LoweredFunctionPaths> {
+                lower_paths_checked(body, params, locals, param_vars).map_err(anyhow::Error::new)
+            }
+
+            pub(crate) fn lower_checked(
+                body: &[$Stmt],
+                params: &[$Binding],
+                locals: &[$Binding],
+                param_vars: &[SymExpr],
+            ) -> LowerResult<SymExpr> {
+                lower_paths_checked(body, params, locals, param_vars)?.fold_return_ite()
             }
 
             /// Lower `body` (with `params` bound to fresh shared `SymExpr::
