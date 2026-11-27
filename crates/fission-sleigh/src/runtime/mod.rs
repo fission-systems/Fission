@@ -45,10 +45,25 @@ pub use registry::{
 };
 pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
 
-/// The two tables the emulator reads out of a packaged `.sla`.
+/// The tables the emulator/lifter read out of a packaged `.sla`.
 struct SlaRuntimeMaps {
     registers: HashMap<String, (u64, u64, u32)>,
     userops: BTreeMap<u32, String>,
+    spec_version: String,
+}
+
+fn compute_sla_spec_version(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    // Deterministic 128-bit FNV-1a fingerprint + byte length so any .sla edit
+    // produces a distinct version string without external hash dependencies.
+    const FNV_OFFSET_BASIS: u128 = 0x6c62272e07bb0142_62b821756295c58d;
+    const FNV_PRIME: u128 = 0x0000000001000000_000000000000013b;
+    let mut hash = FNV_OFFSET_BASIS;
+    for &b in &bytes {
+        hash ^= u128::from(b);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    Some(format!("sla-{hash:032x}-len{}", bytes.len()))
 }
 
 /// Which `.sla` a cached [`SlaRuntimeMaps`] was parsed from: its resolved
@@ -106,6 +121,7 @@ fn sla_runtime_maps(load_spec: &BinaryLoadSpec) -> Option<std::sync::Arc<SlaRunt
         return Some(maps.clone());
     }
 
+    let spec_version = compute_sla_spec_version(&identity.path)?;
     let library = load_construct_templates_from_sla(&identity.path).ok()?;
     #[cfg(test)]
     SLA_RUNTIME_MAP_PARSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -121,6 +137,7 @@ fn sla_runtime_maps(load_spec: &BinaryLoadSpec) -> Option<std::sync::Arc<SlaRunt
             })
             .collect(),
         userops: library.userops,
+        spec_version,
     });
     Some(
         cache
@@ -154,6 +171,30 @@ pub fn userop_map_for_load_spec(
     load_spec: &BinaryLoadSpec,
 ) -> Option<std::collections::BTreeMap<u32, String>> {
     Some(sla_runtime_maps(load_spec)?.userops.clone())
+}
+
+/// Return the deterministic content version string for the packaged `.sla` backing
+/// `load_spec`, used to version-scope typed intrinsic contracts.
+pub fn sla_spec_version_for_load_spec(load_spec: &BinaryLoadSpec) -> Option<String> {
+    Some(sla_runtime_maps(load_spec)?.spec_version.clone())
+}
+
+/// Build the typed, version-scoped [`fission_pcode_ir::IntrinsicRegistry`] from the
+/// packaged `.sla` userop table for `load_spec` and the caller's backend capability matrix.
+pub fn intrinsic_registry_for_load_spec(
+    load_spec: &BinaryLoadSpec,
+    backend: &fission_pcode_ir::BackendIntrinsicCapabilities,
+) -> Option<fission_pcode_ir::IntrinsicRegistry> {
+    let maps = sla_runtime_maps(load_spec)?;
+    let scope = fission_pcode_ir::IntrinsicScope::new(
+        load_spec.pair.language_id.as_str(),
+        maps.spec_version.as_str(),
+    );
+    Some(fission_pcode_ir::build_default_intrinsic_registry(
+        scope,
+        &maps.userops,
+        backend,
+    ))
 }
 
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
