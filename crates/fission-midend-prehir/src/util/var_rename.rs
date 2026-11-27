@@ -138,6 +138,23 @@ pub fn rename_vars_in_expr(expr: &mut PreHirExpr, renames: &[(String, String)]) 
     rename_var_in_expr(expr, renames);
 }
 
+/// Rename variable references across both `func.body` and any parameter/local
+/// binding `initializer` expressions (does not rename `binding.name` itself).
+pub fn rename_vars_in_function_refs(
+    func: &mut crate::ir::PreHirFunction,
+    renames: &[(String, String)],
+) {
+    if renames.is_empty() {
+        return;
+    }
+    rename_vars_in_stmts(&mut func.body, renames);
+    for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        if let Some(initializer) = binding.initializer.as_mut() {
+            rename_var_in_expr(initializer, renames);
+        }
+    }
+}
+
 fn rename_var_name(name: &mut String, renames: &[(String, String)]) {
     if let Some((_, replacement)) = renames.iter().find(|(from, _)| from == name) {
         *name = replacement.clone();
@@ -400,6 +417,58 @@ mod tests {
         assert_eq!(
             local_expr,
             PreHirExpr::AddressOfLocal("renamed_local".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_vars_in_function_refs_updates_body_and_local_initializers() {
+        use crate::ir::{NirType, PreHirBinding, PreHirFunction};
+        use fission_midend_core::ir::NirBindingOrigin;
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut func = PreHirFunction {
+            name: "f".to_string(),
+            params: vec![PreHirBinding {
+                name: "p_renamed".to_string(),
+                ty: ptr_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![PreHirBinding {
+                name: "slot_1".to_string(),
+                ty: ptr_ty,
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: Some(PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("param_1".to_string())),
+                    offset: 1,
+                }),
+            }],
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+                "param_1".to_string(),
+            )))],
+            ..Default::default()
+        };
+
+        rename_vars_in_function_refs(
+            &mut func,
+            &[("param_1".to_string(), "p_renamed".to_string())],
+        );
+        assert_eq!(
+            func.body,
+            vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+                "p_renamed".to_string()
+            )))]
+        );
+        assert_eq!(
+            func.locals[0].initializer,
+            Some(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("p_renamed".to_string())),
+                offset: 1,
+            })
         );
     }
 }

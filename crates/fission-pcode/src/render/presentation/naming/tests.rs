@@ -283,3 +283,87 @@ fn size_naming_strips_module_and_import_prefixes() {
         assert_eq!(func.params[2].name, "n", "target={target}");
     }
 }
+
+#[test]
+fn pointer_rename_rewrites_local_slot_initializers() {
+    let byte_ptr_ty = NirType::Ptr(Box::new(int_ty(8, false)));
+    let mut slot_1 = local("slot_1", byte_ptr_ty.clone());
+    slot_1.initializer = Some(HirExpr::Cast {
+        ty: byte_ptr_ty.clone(),
+        expr: Box::new(HirExpr::PtrOffset {
+            base: Box::new(HirExpr::Var("param_1".into())),
+            offset: 1,
+        }),
+    });
+
+    let mut func = HirFunction {
+        name: "u32_transform_buf".into(),
+        params: vec![param("param_1", byte_ptr_ty)],
+        locals: vec![slot_1],
+        return_type: int_ty(32, false),
+        body: vec![
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("param_1".into())),
+                ty: int_ty(8, false),
+            }),
+            HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("slot_1".into())),
+                ty: int_ty(8, false),
+            })),
+        ],
+        ..Default::default()
+    };
+
+    assert!(apply_semantic_naming(&mut func));
+    assert_eq!(func.params[0].name, "ptr");
+    assert_eq!(
+        func.locals[0].initializer,
+        Some(HirExpr::Cast {
+            ty: NirType::Ptr(Box::new(int_ty(8, false))),
+            expr: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("ptr".into())),
+                offset: 1,
+            }),
+        })
+    );
+    assert!(
+        super::super::invariants::check_hir_presentation_invariants(&func, &func).is_ok(),
+        "renamed slot_1 initializer should pass presentation invariants cleanly"
+    );
+}
+
+#[test]
+fn rename_updates_address_of_local_and_va_start_last_named_param() {
+    let mut func = HirFunction {
+        name: "f".into(),
+        params: vec![param("param_1", ptr_ty())],
+        locals: vec![local("local_8", int_ty(32, true))],
+        return_type: int_ty(32, true),
+        body: vec![
+            HirStmt::VaStart {
+                va_list: HirExpr::Var("local_8".into()),
+                last_named_param: "param_1".into(),
+            },
+            HirStmt::Return(Some(HirExpr::Cast {
+                ty: int_ty(32, true),
+                expr: Box::new(HirExpr::AddressOfLocal("local_8".into())),
+            })),
+        ],
+        ..Default::default()
+    };
+    super::util::rename_var_everywhere(&mut func, "param_1", "fmt");
+    super::util::rename_var_everywhere(&mut func, "local_8", "ap");
+    assert_eq!(
+        func.body,
+        vec![
+            HirStmt::VaStart {
+                va_list: HirExpr::Var("ap".into()),
+                last_named_param: "fmt".into(),
+            },
+            HirStmt::Return(Some(HirExpr::Cast {
+                ty: int_ty(32, true),
+                expr: Box::new(HirExpr::AddressOfLocal("ap".into())),
+            })),
+        ]
+    );
+}

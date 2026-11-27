@@ -28,12 +28,16 @@ pub(super) fn as_var(expr: &HirExpr) -> Option<&str> {
 }
 
 /// Rename every occurrence of variable `old` to `new`: its binding (param or
-/// local) and every read/write of it throughout the body. A pure relabeling
-/// -- evaluation count, order, and side effects are unchanged (ADR 0011).
+/// local), any references inside binding `initializer` expressions, and every
+/// read/write/address-of/va_start reference throughout the body. A pure
+/// relabeling -- evaluation count, order, and side effects are unchanged (ADR 0011).
 pub(super) fn rename_var_everywhere(func: &mut HirFunction, old: &str, new: &str) {
     for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
         if binding.name == old {
             binding.name = new.to_string();
+        }
+        if let Some(initializer) = binding.initializer.as_mut() {
+            rename_var_in_expr(initializer, old, new);
         }
     }
     for stmt in &mut func.body {
@@ -59,12 +63,12 @@ fn rename_var_in_lvalue(lhs: &mut HirLValue, old: &str, new: &str) {
 
 fn rename_var_in_expr(expr: &mut HirExpr, old: &str, new: &str) {
     match expr {
-        HirExpr::Var(n) => {
+        HirExpr::Var(n) | HirExpr::AddressOfLocal(n) => {
             if n == old {
                 *n = new.to_string();
             }
         }
-        HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
             rename_var_in_expr(expr, old, new)
         }
@@ -104,8 +108,15 @@ fn rename_var_in_stmt(stmt: &mut HirStmt, old: &str, new: &str) {
             rename_var_in_lvalue(lhs, old, new);
             rename_var_in_expr(rhs, old, new);
         }
-        HirStmt::Expr(e) | HirStmt::Return(Some(e)) | HirStmt::VaStart { va_list: e, .. } => {
-            rename_var_in_expr(e, old, new)
+        HirStmt::Expr(e) | HirStmt::Return(Some(e)) => rename_var_in_expr(e, old, new),
+        HirStmt::VaStart {
+            va_list,
+            last_named_param,
+        } => {
+            rename_var_in_expr(va_list, old, new);
+            if last_named_param == old {
+                *last_named_param = new.to_string();
+            }
         }
         HirStmt::Return(None)
         | HirStmt::Label(_)

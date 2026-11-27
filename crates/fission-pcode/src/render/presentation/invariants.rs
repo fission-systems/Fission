@@ -528,8 +528,18 @@ fn undef_local_uses(func: &HirFunction) -> HashSet<String> {
     let formals: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     let mut defs = HashMap::new();
     count_var_defs_in_stmts(&func.body, &mut defs);
+    for local in &func.locals {
+        if local.initializer.is_some() {
+            *defs.entry(local.name.clone()).or_default() += 1;
+        }
+    }
     let mut used = HashSet::new();
     collect_var_uses_in_stmts(&func.body, &mut used);
+    for binding in func.params.iter().chain(func.locals.iter()) {
+        if let Some(initializer) = &binding.initializer {
+            collect_var_uses_in_expr(initializer, &mut used);
+        }
+    }
     used.into_iter()
         .filter(|name| {
             !formals.contains(name.as_str()) && defs.get(name).copied().unwrap_or(0) == 0
@@ -682,5 +692,46 @@ mod tests {
             err.iter().any(|v| v.code == "call_count_increased"),
             "expected call_count_increased, got {err:?}"
         );
+    }
+
+    #[test]
+    fn invariants_flag_dangling_var_in_local_initializer_and_accept_valid_slot_init() {
+        let mut before = HirFunction {
+            name: "f".into(),
+            params: vec![param("param_1")],
+            locals: vec![NirBinding {
+                name: "slot_1".into(),
+                ty: NirType::Ptr(Box::new(int_ty(8, false))),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: Some(HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::Var("param_1".into())),
+                    offset: 1,
+                }),
+            }],
+            body: vec![HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("slot_1".into())),
+                ty: int_ty(8, false),
+            }))],
+            return_type: int_ty(32, true),
+            ..Default::default()
+        };
+        assert!(check_hir_presentation_invariants(&before, &before).is_ok());
+
+        let mut after_broken = before.clone();
+        after_broken.params[0].name = "ptr".into();
+        let err = check_hir_presentation_invariants(&before, &after_broken).unwrap_err();
+        assert!(
+            err.iter()
+                .any(|v| v.code == "use_without_def" && v.detail.contains("param_1")),
+            "expected use_without_def for param_1 in initializer, got {err:?}"
+        );
+
+        before.params[0].name = "ptr".into();
+        before.locals[0].initializer = Some(HirExpr::PtrOffset {
+            base: Box::new(HirExpr::Var("ptr".into())),
+            offset: 1,
+        });
+        assert!(check_hir_presentation_invariants(&before, &before).is_ok());
     }
 }

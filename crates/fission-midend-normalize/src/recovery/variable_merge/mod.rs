@@ -18,7 +18,7 @@ use crate::{HashMap, HashSet};
 use copy_aliases::{collect_direct_copies, sorted_var_pair, transitive_copy_aliases};
 use copy_barriers::collect_copy_merge_barrier_vars;
 use copy_conflicts::collect_copy_merge_conflicts;
-use fission_midend_prehir::util::rename_vars_in_stmts;
+use fission_midend_prehir::util::rename_vars_in_function_refs;
 use join_copies::collect_dominant_copy_join_merges;
 use live_ranges::LiveRangeCollector;
 use merge_eligibility::{
@@ -118,7 +118,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     }
 
     if !stack_renames.is_empty() {
-        rename_vars_in_stmts(&mut func.body, &stack_renames);
+        rename_vars_in_function_refs(func, &stack_renames);
         let renamed_from: crate::HashSet<String> =
             stack_renames.iter().map(|(from, _)| from.clone()).collect();
         func.locals
@@ -182,7 +182,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
 
     if !copy_aliases.is_empty() {
         let copy_renames: Vec<(String, String)> = copy_aliases.into_iter().collect();
-        rename_vars_in_stmts(&mut func.body, &copy_renames);
+        rename_vars_in_function_refs(func, &copy_renames);
         let renamed_from: crate::HashSet<String> =
             copy_renames.iter().map(|(from, _)| from.clone()).collect();
         func.locals
@@ -396,7 +396,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     }
 
     if !disjoint_renames.is_empty() {
-        rename_vars_in_stmts(&mut func.body, &disjoint_renames);
+        rename_vars_in_function_refs(func, &disjoint_renames);
         let renamed_from: crate::HashSet<String> = disjoint_renames
             .iter()
             .map(|(from, _)| from.clone())
