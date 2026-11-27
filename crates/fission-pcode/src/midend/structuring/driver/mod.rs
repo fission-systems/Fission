@@ -101,6 +101,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn sese_region_proof_budget_exceeded(&self) -> bool {
+        if fission_core::cancellation::is_current_cancelled() {
+            return true;
+        }
         let calls = self.sese_region_proof_calls.get() + 1;
         self.sese_region_proof_calls.set(calls);
         let limit = self.options.resource_limits.sese_region_proof_calls;

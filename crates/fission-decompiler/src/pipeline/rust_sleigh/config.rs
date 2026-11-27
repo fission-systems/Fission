@@ -17,6 +17,9 @@ pub struct RustSleighDecompileConfig {
     pub nir_timeout_ms: Option<u64>,
     pub pe_x64_only: bool,
     pub conservative_irreducible_fallback: bool,
+    /// Run NIR rendering inside the supervised `fission_nir_worker` subprocess
+    /// for hard wall-clock deadlines and clean OS process-group termination.
+    pub subprocess_isolation: bool,
     /// Deterministic work limits for the render pipeline; copied into the
     /// render options, so they travel with the call.
     pub resource_limits: ResourceLimits,
@@ -43,6 +46,8 @@ impl RustSleighDecompileConfig {
             nir_timeout_ms: None,
             pe_x64_only: false,
             conservative_irreducible_fallback: true,
+            subprocess_isolation: std::env::var_os("FISSION_DECOMP_SUBPROCESS_ISOLATION")
+                .is_some_and(|v| !v.is_empty() && v != "0"),
             resource_limits: ResourceLimits::DEFAULT,
         }
     }

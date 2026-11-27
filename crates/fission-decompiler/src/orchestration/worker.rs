@@ -70,6 +70,7 @@ pub(crate) enum WorkerFailureKind {
     Unavailable,
     TransferTimeout,
     ExecutionTimeout,
+    Cancelled,
     WriteFailed,
     CrashedWorker,
     ProtocolFailure,
@@ -185,6 +186,23 @@ fn timeout_failure(transfer_pending: bool, timeout_ms: u64) -> WorkerFailure {
     }
 }
 
+fn cancelled_failure() -> WorkerFailure {
+    WorkerFailure::new(
+        WorkerFailureKind::Cancelled,
+        "nir_cancelled: Fission NIR worker cancelled",
+    )
+}
+
+fn check_worker_cancellation(transfer_pending: bool, timeout_ms: u64) -> Result<(), WorkerFailure> {
+    match fission_core::cancellation::check_current_cancellation() {
+        Ok(()) => Ok(()),
+        Err(fission_core::cancellation::CancellationReason::Cancelled) => Err(cancelled_failure()),
+        Err(fission_core::cancellation::CancellationReason::TimedOut) => {
+            Err(timeout_failure(transfer_pending, timeout_ms))
+        }
+    }
+}
+
 fn response_too_large(limit: usize, observed: usize) -> WorkerFailure {
     WorkerFailure::new(
         WorkerFailureKind::ProtocolFailure,
@@ -282,11 +300,21 @@ pub(crate) fn execute_nir_worker_request_with_config(
         ));
     }
 
+    check_worker_cancellation(false, config.timeout_ms)?;
+
     // One absolute deadline covers spawn, request transfer and execution, so a
     // worker that never drains stdin cannot stall outside the watchdog.
     let started_at = Instant::now();
-    let deadline =
+    let config_deadline =
         (config.timeout_ms > 0).then(|| started_at + Duration::from_millis(config.timeout_ms));
+    let scope_deadline =
+        fission_core::cancellation::current_cancellation_token().and_then(|t| t.deadline());
+    let deadline = match (config_deadline, scope_deadline) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
 
     let run = supervise::run(config, &request_json, request.address, started_at, deadline)?;
     finalize_worker_result(request, sent_request_id, run)
@@ -683,6 +711,10 @@ mod supervise {
                         Some(limit)
                     }
                     None => {
+                        super::super::check_worker_cancellation(
+                            stdin.is_some(),
+                            config.timeout_ms,
+                        )?;
                         if let Some(dl) = deadline
                             && now >= dl
                         {
@@ -1073,6 +1105,10 @@ mod supervise {
                     }
                     Some(_) => {}
                     None => {
+                        super::super::check_worker_cancellation(
+                            stdin_result.is_none(),
+                            config.timeout_ms,
+                        )?;
                         if let Some(dl) = deadline
                             && now >= dl
                         {
@@ -2000,6 +2036,53 @@ mod tests {
             ),
             "nir_worker_failure"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_active_token_kills_slow_worker_subprocess_promptly() {
+        let tmp = TempScriptDir::new("cancel_worker");
+        let pid_file = tmp.dir.join("worker.pid");
+        let script = tmp.write_executable(
+            "slow_worker.sh",
+            &format!(
+                "echo $$ > \"{}\"\nsleep 30\necho '{{\"success\":true}}' ",
+                pid_file.display()
+            ),
+        );
+        let config = WorkerRunConfig::with_path(script, 10_000);
+        let req = sample_request(16);
+        let token = fission_core::CancellationToken::new();
+        let token_canceller = token.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            token_canceller.cancel();
+        });
+
+        let started = Instant::now();
+        let err = fission_core::cancellation::with_cancellation_scope(token, || {
+            execute_nir_worker_request_with_config(&req, &config)
+        })
+        .expect_err("cancelled worker must fail");
+        let elapsed = started.elapsed();
+
+        assert_eq!(err.kind, WorkerFailureKind::Cancelled);
+        assert!(err.message.contains("nir_cancelled"), "{}", err.message);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "expected prompt cancellation kill, took {elapsed:?}"
+        );
+        if let Ok(pid_text) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = pid_text.trim().parse::<i32>()
+        {
+            assert!(
+                !wait_until(Duration::from_millis(10), || false)
+                    && wait_until(Duration::from_secs(2), || {
+                        unsafe { libc::kill(pid, 0) != 0 }
+                    }),
+                "cancelled worker pid {pid} should be reaped"
+            );
+        }
     }
 }
 

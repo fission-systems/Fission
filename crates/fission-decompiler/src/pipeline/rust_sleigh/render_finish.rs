@@ -213,17 +213,19 @@ pub(crate) fn finish_rust_sleigh_render(
     options.userops = userops;
     apply_spec_overrides(binary, &mut options);
 
-    let (selection, learned_facts) = select_nir_output_from_prebuilt_pcode_with_learned_facts(
-        pcode,
-        binary,
-        fact_store,
-        entry_address,
-        name,
-        config.nir_mode,
-        config.nir_timeout_ms,
-        options,
-    )
-    .map_err(|e| format!("rust_sleigh routing failed: {e}"))?;
+    let (selection, learned_facts) =
+        select_nir_output_from_prebuilt_pcode_with_learned_facts_and_isolation(
+            pcode,
+            binary,
+            fact_store,
+            entry_address,
+            name,
+            config.nir_mode,
+            config.nir_timeout_ms,
+            options,
+            config.subprocess_isolation,
+        )
+        .map_err(|e| format!("rust_sleigh routing failed: {e}"))?;
 
     evidence.nir_fallback_kind = selection.fallback_kind.map(|s| s.to_string());
     evidence.nir_fallback_kind_refined = selection.fallback_kind_refined.map(|s| s.to_string());
@@ -323,7 +325,7 @@ pub fn select_nir_output_from_prebuilt_pcode_with_facts(
 /// Like [`select_nir_output_from_prebuilt_pcode_with_facts`], but also
 /// surfaces the [`FactStore`] the render pass learned along the way -- see
 /// [`crate::routing::select_nir_output_from_pcode_with_learned_facts`].
-fn select_nir_output_from_prebuilt_pcode_with_learned_facts(
+fn select_nir_output_from_prebuilt_pcode_with_learned_facts_and_isolation(
     pcode: &PcodeFunction,
     binary: &LoadedBinary,
     fact_store: &FactStore,
@@ -332,8 +334,17 @@ fn select_nir_output_from_prebuilt_pcode_with_learned_facts(
     mode: NirEngineMode,
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
+    subprocess_isolation: bool,
 ) -> Result<(NirSelection, Option<FactStore>), String> {
-    crate::routing::select_nir_output_from_pcode_with_learned_facts(
-        pcode, binary, fact_store, address, name, mode, timeout_ms, options,
+    crate::routing::select_nir_output_from_pcode_with_learned_facts_and_isolation(
+        pcode,
+        binary,
+        fact_store,
+        address,
+        name,
+        mode,
+        timeout_ms,
+        options,
+        subprocess_isolation,
     )
 }

@@ -274,6 +274,14 @@ mod tests {
             classify_nir_failure_refined("mlil-preview worker response parse failed: bad json"),
             "nir_worker_failure"
         );
+        assert_eq!(
+            classify_nir_failure_refined("nir_cancelled: Fission NIR pipeline cancelled (test)"),
+            "nir_cancelled"
+        );
+        assert_eq!(
+            crate::classify_nir_failure("nir_cancelled: Fission NIR worker cancelled"),
+            "nir_cancelled"
+        );
     }
 
     #[test]

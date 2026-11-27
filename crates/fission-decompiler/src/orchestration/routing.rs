@@ -75,6 +75,14 @@ fn render_selection_from_json(
             if err.contains("not a function (orphan block detected)") {
                 return Ok(NirRoutingResolver::nir_skipped(&err));
             }
+            if fission_core::cancellation::is_current_cancelled()
+                || matches!(
+                    crate::taxonomy::classify_nir_failure_refined(&err),
+                    "nir_timeout" | "nir_cancelled"
+                )
+            {
+                return Ok(NirRoutingResolver::nir_fallback(&err));
+            }
             if let Some(selection) = try_structuring_recovery_with_facts(
                 pcode_json, binary, fact_store, address, name, timeout_ms, &err,
             )? {
@@ -123,9 +131,10 @@ fn render_selection_from_pcode(
     prefer_preview_surface: bool,
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
+    subprocess_isolation: bool,
 ) -> Result<(NirSelection, Option<FactStore>), String> {
     let decomp_ctx = crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
-    match crate::render::render_nir_from_pcode_with_decomp_context_preserving_options(
+    match crate::render::render_nir_from_pcode_with_decomp_context_and_isolation(
         pcode,
         binary,
         address,
@@ -136,18 +145,31 @@ fn render_selection_from_pcode(
         options,
         false,
         false,
+        subprocess_isolation,
     ) {
-        Ok(Some((output, learned_facts))) => Ok((
-            NirRoutingResolver::nir_success(
-                output.code.clone(),
-                output.build_stats.clone(),
-                output.hint_stats.clone(),
-                false,
-                None,
-            )
-            .with_render_output(output),
-            Some(learned_facts),
-        )),
+        Ok(Some((output, learned_facts))) => {
+            if fission_core::cancellation::is_current_cancelled() {
+                let cancelled = crate::rust_sleigh::format_cancellation_error(
+                    fission_core::cancellation::check_current_cancellation()
+                        .err()
+                        .unwrap_or(fission_core::cancellation::CancellationReason::Cancelled),
+                    "before publishing selection",
+                    timeout_ms,
+                );
+                return Ok((NirRoutingResolver::nir_fallback(&cancelled), None));
+            }
+            Ok((
+                NirRoutingResolver::nir_success(
+                    output.code.clone(),
+                    output.build_stats.clone(),
+                    output.hint_stats.clone(),
+                    false,
+                    None,
+                )
+                .with_render_output(output),
+                Some(learned_facts),
+            ))
+        }
         Ok(None) => Ok((
             NirRoutingResolver::nir_fallback(
                 "nir skipped: function not supported by Fission NIR builder",
@@ -157,6 +179,14 @@ fn render_selection_from_pcode(
         Err((recovery_options, err)) => {
             if err.contains("not a function (orphan block detected)") {
                 return Ok((NirRoutingResolver::nir_skipped(&err), None));
+            }
+            if fission_core::cancellation::is_current_cancelled()
+                || matches!(
+                    crate::taxonomy::classify_nir_failure_refined(&err),
+                    "nir_timeout" | "nir_cancelled"
+                )
+            {
+                return Ok((NirRoutingResolver::nir_fallback(&err), None));
             }
             let recovery_decomp_ctx =
                 crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
@@ -289,6 +319,7 @@ pub fn select_nir_output_from_pcode_with_facts(
 /// want to persist that beyond this one render call (e.g. a server session
 /// reusing facts across separate decompile requests) need this variant;
 /// everyone else can keep using the plain one above.
+#[allow(clippy::too_many_arguments)]
 pub fn select_nir_output_from_pcode_with_learned_facts(
     pcode: &PcodeFunction,
     binary: &LoadedBinary,
@@ -298,6 +329,23 @@ pub fn select_nir_output_from_pcode_with_learned_facts(
     mode: NirEngineMode,
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
+) -> Result<(NirSelection, Option<FactStore>), String> {
+    select_nir_output_from_pcode_with_learned_facts_and_isolation(
+        pcode, binary, fact_store, address, name, mode, timeout_ms, options, false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_nir_output_from_pcode_with_learned_facts_and_isolation(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+    subprocess_isolation: bool,
 ) -> Result<(NirSelection, Option<FactStore>), String> {
     match mode {
         NirEngineMode::Legacy => Ok((NirRoutingResolver::legacy_mode(), None)),
@@ -310,6 +358,7 @@ pub fn select_nir_output_from_pcode_with_learned_facts(
             matches!(mode, NirEngineMode::Auto),
             timeout_ms,
             options,
+            subprocess_isolation,
         ),
     }
 }

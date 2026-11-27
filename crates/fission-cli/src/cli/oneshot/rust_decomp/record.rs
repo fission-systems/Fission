@@ -29,6 +29,7 @@ pub(crate) struct CliRustDecompileRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InfrastructureFailureKind {
     WorkerInternalError,
+    WorkerUnavailable,
     NotStarted,
     Cancelled,
 }
@@ -37,6 +38,7 @@ impl InfrastructureFailureKind {
     pub(crate) fn fallback_reason(self) -> &'static str {
         match self {
             Self::WorkerInternalError => "rust_sleigh:worker_internal_error",
+            Self::WorkerUnavailable => "rust_sleigh:worker_unavailable",
             Self::NotStarted => "rust_sleigh:worker_not_started",
             Self::Cancelled => "rust_sleigh:worker_cancelled",
         }
@@ -45,6 +47,7 @@ impl InfrastructureFailureKind {
     pub(crate) fn job_status(self) -> &'static str {
         match self {
             Self::WorkerInternalError => "infrastructure_failed",
+            Self::WorkerUnavailable => "worker_unavailable",
             Self::NotStarted => "not_started",
             Self::Cancelled => "cancelled",
         }

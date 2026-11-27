@@ -623,6 +623,9 @@ pub fn run_normalize_pipeline(
 ) {
     let total_start = Instant::now();
     wave_stats::reset_normalize_wave_stats();
+    if fission_core::cancellation::is_current_cancelled() {
+        return;
+    }
 
     if diag {
         eprintln!(
@@ -642,7 +645,12 @@ pub fn run_normalize_pipeline(
             stats: None,
             decomp_facts,
         };
-        pipeline.run(&mut ctx);
+        for group in &pipeline.groups {
+            if fission_core::cancellation::is_current_cancelled() {
+                break;
+            }
+            group.run(&mut ctx);
+        }
     }
 
     if perf {
