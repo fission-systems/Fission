@@ -693,10 +693,19 @@ impl<'a> PreviewBuilder<'a> {
         if self.pcode.blocks.is_empty() {
             return Err(MlilPreviewError::UnsupportedPattern("empty pcode"));
         }
+        if fission_core::cancellation::is_current_cancelled() {
+            return Err(MlilPreviewError::UnsupportedPattern("cancelled"));
+        }
 
         self.run_incremental_heritage()?;
+        if fission_core::cancellation::is_current_cancelled() {
+            return Err(MlilPreviewError::UnsupportedPattern("cancelled"));
+        }
         self.prime_call_result_bindings();
         self.prepare_ssa_emission();
+        if fission_core::cancellation::is_current_cancelled() {
+            return Err(MlilPreviewError::UnsupportedPattern("cancelled"));
+        }
 
         let mut body = Vec::new();
         if self.pcode.blocks.len() == 1 {

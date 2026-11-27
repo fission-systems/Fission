@@ -5,15 +5,19 @@ use crate::cli::oneshot::rust_decomp::{
     FunctionRenderResult, RenderOutcomeKind, make_aborted_render_result,
     make_infrastructure_error_result, make_internal_error_result, render_one_function_inner,
 };
+use fission_core::cancellation::{CancellationReason, CancellationToken, with_cancellation_scope};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::cmp::min;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DEFAULT_DECOMP_STACK_MB: usize = 32;
+const DEFAULT_CANCEL_GRACE_MS: u64 = 50;
+const DEFAULT_SHUTDOWN_GRACE_MS: u64 = 100;
+const CANCEL_POLL_TICK: Duration = Duration::from_millis(25);
 
 pub(crate) fn resolve_worker_count(total_functions: usize) -> usize {
     if total_functions <= 1 {
@@ -72,6 +76,238 @@ pub(crate) fn resolve_resource_limits(
     fission_decompiler::midend_core::ir::ResourceLimits::DEFAULT.with_overrides(&overrides)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WorkerLifecyclePolicy {
+    pub max_live_workers: usize,
+    pub grace_period: Duration,
+    pub shutdown_grace: Duration,
+}
+
+impl WorkerLifecyclePolicy {
+    pub(crate) fn for_workers(worker_count: usize) -> Self {
+        Self {
+            max_live_workers: worker_count.max(1),
+            grace_period: Duration::from_millis(DEFAULT_CANCEL_GRACE_MS),
+            shutdown_grace: Duration::from_millis(DEFAULT_SHUTDOWN_GRACE_MS),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) struct WorkerLifecycleSnapshot {
+    pub active_workers: usize,
+    pub peak_active_workers: usize,
+    pub reclaimed_workers: usize,
+    pub quota_exhausted_tasks: usize,
+}
+
+struct DetachedWorker {
+    handle: Option<thread::JoinHandle<()>>,
+    exited: Arc<AtomicBool>,
+}
+
+struct WorkerTrackerState {
+    active_workers: usize,
+    peak_active_workers: usize,
+    reclaimed_workers: usize,
+    quota_exhausted_tasks: usize,
+    detached: Vec<DetachedWorker>,
+}
+
+/// Coordinates live execution worker slots across normal completion,
+/// cooperative grace-period reclamation, and unexited timed-out workers.
+pub(crate) struct WorkerSlotTracker {
+    max_live_workers: usize,
+    state: Mutex<WorkerTrackerState>,
+    exit_cv: Condvar,
+}
+
+impl WorkerSlotTracker {
+    pub(crate) fn new(max_live_workers: usize) -> Arc<Self> {
+        Arc::new(Self {
+            max_live_workers: max_live_workers.max(1),
+            state: Mutex::new(WorkerTrackerState {
+                active_workers: 0,
+                peak_active_workers: 0,
+                reclaimed_workers: 0,
+                quota_exhausted_tasks: 0,
+                detached: Vec::new(),
+            }),
+            exit_cv: Condvar::new(),
+        })
+    }
+
+    pub(crate) fn try_acquire_slot(self: &Arc<Self>) -> Option<WorkerSlotPermit> {
+        self.reap_finished();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.active_workers >= self.max_live_workers {
+            state.quota_exhausted_tasks += 1;
+            return None;
+        }
+        state.active_workers += 1;
+        state.peak_active_workers = state.peak_active_workers.max(state.active_workers);
+        Some(WorkerSlotPermit {
+            tracker: Arc::clone(self),
+            exited: Arc::new(AtomicBool::new(false)),
+            armed: true,
+        })
+    }
+
+    /// Wait up to `grace` for `handle` to exit cleanly and join it. If it is
+    /// still running after `grace`, retain the handle in `detached` while
+    /// keeping its slot accounted for in `active_workers` until it exits.
+    pub(crate) fn abandon_with_grace(
+        &self,
+        handle: thread::JoinHandle<()>,
+        exited: Arc<AtomicBool>,
+        grace: Duration,
+    ) -> bool {
+        if grace > Duration::ZERO {
+            let deadline = Instant::now() + grace;
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            while !exited.load(Ordering::Acquire) {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                let (guard, timeout_res) = self
+                    .exit_cv
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(|e| e.into_inner());
+                state = guard;
+                if timeout_res.timed_out() {
+                    break;
+                }
+            }
+        }
+        if exited.load(Ordering::Acquire) {
+            let _ = handle.join();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.reclaimed_workers += 1;
+            true
+        } else {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if exited.load(Ordering::Acquire) {
+                drop(state);
+                let _ = handle.join();
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                state.reclaimed_workers += 1;
+                true
+            } else {
+                state.detached.push(DetachedWorker {
+                    handle: Some(handle),
+                    exited,
+                });
+                false
+            }
+        }
+    }
+
+    pub(crate) fn reap_finished(&self) -> usize {
+        let mut ready = Vec::new();
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut remaining = Vec::with_capacity(state.detached.len());
+            for worker in state.detached.drain(..) {
+                if worker.exited.load(Ordering::Acquire) {
+                    ready.push(worker);
+                } else {
+                    remaining.push(worker);
+                }
+            }
+            state.detached = remaining;
+        }
+        let mut reaped = 0usize;
+        for mut worker in ready {
+            if let Some(handle) = worker.handle.take() {
+                let _ = handle.join();
+                reaped += 1;
+            }
+        }
+        if reaped > 0 {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.reclaimed_workers += reaped;
+        }
+        reaped
+    }
+
+    pub(crate) fn shutdown_drain(&self, grace: Duration) -> WorkerLifecycleSnapshot {
+        self.reap_finished();
+        if grace > Duration::ZERO {
+            let deadline = Instant::now() + grace;
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            while state.active_workers > 0 {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                let (guard, timeout_res) = self
+                    .exit_cv
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(|e| e.into_inner());
+                state = guard;
+                if timeout_res.timed_out() {
+                    break;
+                }
+            }
+        }
+        self.reap_finished();
+        self.snapshot()
+    }
+
+    pub(crate) fn snapshot(&self) -> WorkerLifecycleSnapshot {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        WorkerLifecycleSnapshot {
+            active_workers: state.active_workers,
+            peak_active_workers: state.peak_active_workers,
+            reclaimed_workers: state.reclaimed_workers,
+            quota_exhausted_tasks: state.quota_exhausted_tasks,
+        }
+    }
+}
+
+pub(crate) struct WorkerSlotPermit {
+    tracker: Arc<WorkerSlotTracker>,
+    exited: Arc<AtomicBool>,
+    armed: bool,
+}
+
+impl WorkerSlotPermit {
+    fn into_guard(mut self) -> WorkerSlotGuard {
+        self.armed = false;
+        WorkerSlotGuard {
+            tracker: Arc::clone(&self.tracker),
+            exited: Arc::clone(&self.exited),
+        }
+    }
+}
+
+impl Drop for WorkerSlotPermit {
+    fn drop(&mut self) {
+        if self.armed {
+            let mut state = self.tracker.state.lock().unwrap_or_else(|e| e.into_inner());
+            self.exited.store(true, Ordering::Release);
+            state.active_workers = state.active_workers.saturating_sub(1);
+            self.tracker.exit_cv.notify_all();
+        }
+    }
+}
+
+struct WorkerSlotGuard {
+    tracker: Arc<WorkerSlotTracker>,
+    exited: Arc<AtomicBool>,
+}
+
+impl Drop for WorkerSlotGuard {
+    fn drop(&mut self) {
+        let mut state = self.tracker.state.lock().unwrap_or_else(|e| e.into_inner());
+        self.exited.store(true, Ordering::Release);
+        state.active_workers = state.active_workers.saturating_sub(1);
+        self.tracker.exit_cv.notify_all();
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn render_one_function_on_large_stack(
     binary: Arc<fission_loader::loader::LoadedBinary>,
     facts: Arc<FactStore>,
@@ -79,22 +315,33 @@ pub(crate) fn render_one_function_on_large_stack(
     config: RenderConfig,
     stack_size_bytes: usize,
 ) -> FunctionRenderResult {
+    let tracker = WorkerSlotTracker::new(1);
+    let policy = WorkerLifecyclePolicy::for_workers(1);
+    let batch_token = CancellationToken::new();
     let func_owned = func.clone();
     let binary_for_render = Arc::clone(&binary);
-    render_on_large_stack_with(binary, func, config, stack_size_bytes, move || {
-        render_one_function_inner(
-            binary_for_render.as_ref(),
-            facts.as_ref(),
-            &func_owned,
-            config,
-        )
-    })
+    let result = render_on_large_stack_with_pool(
+        binary,
+        func,
+        config,
+        stack_size_bytes,
+        &tracker,
+        &batch_token,
+        policy,
+        move || {
+            render_one_function_inner(
+                binary_for_render.as_ref(),
+                facts.as_ref(),
+                &func_owned,
+                config,
+            )
+        },
+    );
+    tracker.shutdown_drain(policy.shutdown_grace);
+    result
 }
 
-/// Run `render` for `func` on a dedicated large-stack thread, bounded by the
-/// configured render timeout. A panic inside `render`, or `render` running
-/// past the timeout, is an *analysis* outcome for this function; failing to
-/// spawn or lose the thread is an infrastructure one.
+#[cfg(test)]
 fn render_on_large_stack_with<R>(
     binary: Arc<fission_loader::loader::LoadedBinary>,
     func: &FunctionInfo,
@@ -105,6 +352,116 @@ fn render_on_large_stack_with<R>(
 where
     R: FnOnce() -> FunctionRenderResult + Send + 'static,
 {
+    let tracker = WorkerSlotTracker::new(1);
+    let policy = WorkerLifecyclePolicy::for_workers(1);
+    let batch_token = CancellationToken::new();
+    let result = render_on_large_stack_with_pool(
+        binary,
+        func,
+        config,
+        stack_size_bytes,
+        &tracker,
+        &batch_token,
+        policy,
+        render,
+    );
+    tracker.shutdown_drain(policy.shutdown_grace);
+    result
+}
+
+fn recv_with_cancellation(
+    result_rx: &mpsc::Receiver<FunctionRenderResult>,
+    token: &CancellationToken,
+) -> Result<FunctionRenderResult, RecvOrCancel> {
+    loop {
+        match token.check() {
+            Err(CancellationReason::Cancelled) => return Err(RecvOrCancel::Cancelled),
+            Err(CancellationReason::TimedOut) => return Err(RecvOrCancel::TimedOut),
+            Ok(()) => {}
+        }
+        let wait = token
+            .remaining()
+            .map(|rem| rem.min(CANCEL_POLL_TICK))
+            .unwrap_or(CANCEL_POLL_TICK);
+        match result_rx.recv_timeout(wait) {
+            Ok(result) => match token.check() {
+                Ok(()) => return Ok(result),
+                Err(CancellationReason::Cancelled) => return Err(RecvOrCancel::Cancelled),
+                Err(CancellationReason::TimedOut) => return Err(RecvOrCancel::TimedOut),
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => match token.check() {
+                Ok(()) => return Err(RecvOrCancel::Disconnected),
+                Err(CancellationReason::Cancelled) => return Err(RecvOrCancel::Cancelled),
+                Err(CancellationReason::TimedOut) => return Err(RecvOrCancel::TimedOut),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecvOrCancel {
+    TimedOut,
+    Cancelled,
+    Disconnected,
+}
+
+/// Run `render` for `func` on a dedicated large-stack thread, bounded by the
+/// configured render timeout and worker slot tracker.
+#[allow(clippy::too_many_arguments)]
+fn render_on_large_stack_with_pool<R>(
+    binary: Arc<fission_loader::loader::LoadedBinary>,
+    func: &FunctionInfo,
+    config: RenderConfig,
+    stack_size_bytes: usize,
+    tracker: &Arc<WorkerSlotTracker>,
+    batch_token: &CancellationToken,
+    policy: WorkerLifecyclePolicy,
+    render: R,
+) -> FunctionRenderResult
+where
+    R: FnOnce() -> FunctionRenderResult + Send + 'static,
+{
+    match batch_token.check() {
+        Err(CancellationReason::Cancelled) => {
+            return make_infrastructure_error_result(
+                binary.as_ref(),
+                func,
+                InfrastructureFailureKind::Cancelled,
+                "decompilation cancelled before starting worker".to_string(),
+                config,
+            );
+        }
+        Err(CancellationReason::TimedOut) => {
+            let ms = config.timeout_ms.unwrap_or(0);
+            return make_aborted_render_result(
+                binary.as_ref(),
+                func,
+                AbortedRenderKind::AnalysisTimedOut,
+                render_timeout_message(ms),
+                config,
+            );
+        }
+        Ok(()) => {}
+    }
+
+    let Some(permit) = tracker.try_acquire_slot() else {
+        return make_infrastructure_error_result(
+            binary.as_ref(),
+            func,
+            InfrastructureFailureKind::WorkerUnavailable,
+            format!(
+                "decompiler worker concurrency quota exhausted (max_live_workers={})",
+                policy.max_live_workers
+            ),
+            config,
+        );
+    };
+
+    let exited = Arc::clone(&permit.exited);
+    let timeout_ms = config.timeout_ms.filter(|ms| *ms > 0);
+    let task_token = batch_token.child(timeout_ms.map(Duration::from_millis));
+    let task_token_for_thread = task_token.clone();
     let func_for_thread = func.clone();
     let binary_for_thread = Arc::clone(&binary);
     let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
@@ -113,27 +470,46 @@ where
         .name(format!("fission-rust-decomp-0x{:x}", func.address))
         .stack_size(stack_size_bytes)
         .spawn(move || {
-            let result =
-                render_catching_panic(binary_for_thread.as_ref(), &func_for_thread, config, render);
-            let _ = result_tx.send(result);
+            let _slot_guard = permit.into_guard();
+            let result = with_cancellation_scope(task_token_for_thread.clone(), || {
+                render_catching_panic(binary_for_thread.as_ref(), &func_for_thread, config, render)
+            });
+            if !task_token_for_thread.is_cancelled() {
+                let _ = result_tx.send(result);
+            }
         });
 
     match spawn {
         Ok(handle) => {
-            if let Some(timeout_ms) = config.timeout_ms.filter(|timeout_ms| *timeout_ms > 0) {
-                match result_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
+            if timeout_ms.is_some() || batch_token.deadline().is_some() {
+                match recv_with_cancellation(&result_rx, &task_token) {
                     Ok(result) => {
                         let _ = handle.join();
                         result
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => make_aborted_render_result(
-                        binary.as_ref(),
-                        func,
-                        AbortedRenderKind::AnalysisTimedOut,
-                        render_timeout_message(timeout_ms),
-                        config,
-                    ),
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    Err(RecvOrCancel::TimedOut) => {
+                        task_token.mark_timed_out();
+                        let _ = tracker.abandon_with_grace(handle, exited, policy.grace_period);
+                        let reported_ms = timeout_ms.unwrap_or(0);
+                        make_aborted_render_result(
+                            binary.as_ref(),
+                            func,
+                            AbortedRenderKind::AnalysisTimedOut,
+                            render_timeout_message(reported_ms),
+                            config,
+                        )
+                    }
+                    Err(RecvOrCancel::Cancelled) => {
+                        let _ = tracker.abandon_with_grace(handle, exited, policy.grace_period);
+                        make_infrastructure_error_result(
+                            binary.as_ref(),
+                            func,
+                            InfrastructureFailureKind::Cancelled,
+                            "decompilation worker cancelled".to_string(),
+                            config,
+                        )
+                    }
+                    Err(RecvOrCancel::Disconnected) => {
                         let _ = handle.join();
                         make_internal_error_result(
                             binary.as_ref(),
@@ -144,23 +520,53 @@ where
                     }
                 }
             } else {
-                match handle.join() {
-                    Ok(()) => result_rx.recv().unwrap_or_else(|_| {
-                        make_internal_error_result(
+                // `--timeout-ms=0` disables the wall-clock deadline while still
+                // honoring explicit cancellation.
+                match recv_with_cancellation(&result_rx, &task_token) {
+                    Ok(result) => match handle.join() {
+                        Ok(()) => result,
+                        Err(_) => make_internal_error_result(
+                            binary.as_ref(),
+                            func,
+                            "render worker thread panicked outside the render".to_string(),
+                            config,
+                        ),
+                    },
+                    Err(RecvOrCancel::Cancelled) => {
+                        let _ = tracker.abandon_with_grace(handle, exited, policy.grace_period);
+                        make_infrastructure_error_result(
+                            binary.as_ref(),
+                            func,
+                            InfrastructureFailureKind::Cancelled,
+                            "decompilation worker cancelled".to_string(),
+                            config,
+                        )
+                    }
+                    Err(RecvOrCancel::TimedOut) => {
+                        task_token.mark_timed_out();
+                        let _ = tracker.abandon_with_grace(handle, exited, policy.grace_period);
+                        make_aborted_render_result(
+                            binary.as_ref(),
+                            func,
+                            AbortedRenderKind::AnalysisTimedOut,
+                            render_timeout_message(0),
+                            config,
+                        )
+                    }
+                    Err(RecvOrCancel::Disconnected) => match handle.join() {
+                        Ok(()) => make_internal_error_result(
                             binary.as_ref(),
                             func,
                             "worker thread exited before returning a render result".to_string(),
                             config,
-                        )
-                    }),
-                    // `render` itself runs under `catch_unwind`; a join error
-                    // is a panic in the thread's own plumbing.
-                    Err(_) => make_internal_error_result(
-                        binary.as_ref(),
-                        func,
-                        "render worker thread panicked outside the render".to_string(),
-                        config,
-                    ),
+                        ),
+                        Err(_) => make_internal_error_result(
+                            binary.as_ref(),
+                            func,
+                            "render worker thread panicked outside the render".to_string(),
+                            config,
+                        ),
+                    },
                 }
             }
         }
@@ -255,6 +661,10 @@ pub(crate) struct BatchLedgerSummary {
     pub join_errors: usize,
     pub consumer_errors: usize,
     pub sequential_fallback: bool,
+    pub peak_active_workers: usize,
+    pub still_running_workers: usize,
+    pub reclaimed_workers: usize,
+    pub quota_exhausted_tasks: usize,
 }
 
 impl BatchLedgerSummary {
@@ -467,6 +877,7 @@ struct BatchTaskLedger {
     join_errors: usize,
     consumer_errors: usize,
     sequential_fallback: bool,
+    lifecycle: WorkerLifecycleSnapshot,
 }
 
 impl BatchTaskLedger {
@@ -491,6 +902,7 @@ impl BatchTaskLedger {
             join_errors: 0,
             consumer_errors: 0,
             sequential_fallback: false,
+            lifecycle: WorkerLifecycleSnapshot::default(),
         }
     }
 
@@ -524,9 +936,10 @@ impl BatchTaskLedger {
             RenderOutcomeKind::Analysis | RenderOutcomeKind::AnalysisAborted => {
                 TaskTerminalKind::AnalysisCompleted
             }
-            RenderOutcomeKind::Infrastructure(InfrastructureFailureKind::WorkerInternalError) => {
-                TaskTerminalKind::InfrastructureFailed
-            }
+            RenderOutcomeKind::Infrastructure(
+                InfrastructureFailureKind::WorkerInternalError
+                | InfrastructureFailureKind::WorkerUnavailable,
+            ) => TaskTerminalKind::InfrastructureFailed,
             RenderOutcomeKind::Infrastructure(InfrastructureFailureKind::NotStarted) => {
                 TaskTerminalKind::NotStarted
             }
@@ -685,6 +1098,10 @@ impl BatchTaskLedger {
             join_errors: self.join_errors,
             consumer_errors: self.consumer_errors,
             sequential_fallback: self.sequential_fallback,
+            peak_active_workers: self.lifecycle.peak_active_workers,
+            still_running_workers: self.lifecycle.active_workers,
+            reclaimed_workers: self.lifecycle.reclaimed_workers,
+            quota_exhausted_tasks: self.lifecycle.quota_exhausted_tasks,
             ..BatchLedgerSummary::default()
         };
 
@@ -735,10 +1152,33 @@ impl BatchTaskLedger {
     }
 }
 
+type RenderFn = Arc<
+    dyn Fn(&LoadedBinary, &FactStore, &FunctionInfo, RenderConfig) -> FunctionRenderResult
+        + Send
+        + Sync,
+>;
+
+fn production_render_fn() -> RenderFn {
+    Arc::new(render_one_function_catching_panic)
+}
+
+fn sync_cancel(cancel: &AtomicBool, token: &CancellationToken) {
+    if cancel.load(Ordering::Acquire) {
+        token.cancel();
+    }
+}
+
+enum WorkerSpawnError {
+    QuotaExhausted,
+    Io(std::io::Error),
+}
+
 struct PersistentDecompWorker {
-    request_tx: mpsc::SyncSender<ScheduledTask>,
+    request_tx: mpsc::SyncSender<(ScheduledTask, CancellationToken)>,
     result_rx: mpsc::Receiver<FunctionRenderResult>,
     handle: Option<thread::JoinHandle<()>>,
+    exited: Arc<AtomicBool>,
+    tracker: Arc<WorkerSlotTracker>,
 }
 
 impl PersistentDecompWorker {
@@ -748,31 +1188,44 @@ impl PersistentDecompWorker {
         facts: Arc<FactStore>,
         config: RenderConfig,
         stack_size_bytes: usize,
-    ) -> Result<Self, std::io::Error> {
-        let (request_tx, request_rx) = mpsc::sync_channel::<ScheduledTask>(0);
+        tracker: Arc<WorkerSlotTracker>,
+        render_fn: RenderFn,
+    ) -> Result<Self, WorkerSpawnError> {
+        let Some(permit) = tracker.try_acquire_slot() else {
+            return Err(WorkerSpawnError::QuotaExhausted);
+        };
+        let exited = Arc::clone(&permit.exited);
+        let (request_tx, request_rx) = mpsc::sync_channel::<(ScheduledTask, CancellationToken)>(0);
         let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
         let handle = thread::Builder::new()
             .name(format!("fission-rust-decomp-worker-{worker_idx}"))
             .stack_size(stack_size_bytes)
             .spawn(move || {
-                while let Ok(task) = request_rx.recv() {
+                let _slot_guard = permit.into_guard();
+                while let Ok((task, task_token)) = request_rx.recv() {
+                    if task_token.is_cancelled() {
+                        break;
+                    }
                     let result = task.render(|func| {
-                        render_one_function_catching_panic(
-                            binary.as_ref(),
-                            facts.as_ref(),
-                            func,
-                            config,
-                        )
+                        with_cancellation_scope(task_token.clone(), || {
+                            render_fn(binary.as_ref(), facts.as_ref(), func, config)
+                        })
                     });
+                    if task_token.is_cancelled() {
+                        break;
+                    }
                     if result_tx.send(result).is_err() {
                         break;
                     }
                 }
-            })?;
+            })
+            .map_err(WorkerSpawnError::Io)?;
         Ok(Self {
             request_tx,
             result_rx,
             handle: Some(handle),
+            exited,
+            tracker,
         })
     }
 
@@ -783,10 +1236,14 @@ impl PersistentDecompWorker {
         }
     }
 
-    /// Abandon a child that may still be running; it exits on its own once
-    /// its next send finds the result channel closed.
-    fn detach(mut self) {
-        self.handle.take();
+    /// Close request channel, wait up to `grace` for cooperative unwind, and
+    /// otherwise retain the live worker handle in `tracker` so its slot
+    /// stays accounted for until exit.
+    fn cancel_and_release(mut self, grace: Duration) {
+        drop(self.request_tx);
+        if let Some(handle) = self.handle.take() {
+            let _ = self.tracker.abandon_with_grace(handle, self.exited, grace);
+        }
     }
 }
 
@@ -803,61 +1260,125 @@ struct WorkerSupervisorContext {
     progress: Arc<BatchProgressTracker>,
     cancel: Arc<AtomicBool>,
     stop_dispatch: Arc<AtomicBool>,
+    batch_token: CancellationToken,
+    slot_tracker: Arc<WorkerSlotTracker>,
+    policy: WorkerLifecyclePolicy,
+    render_fn: RenderFn,
 }
 
 /// Render `task` on the supervisor's persistent large-stack child, bounded
-/// by `timeout_ms`; the child is replaced after a timeout or a failure.
+/// by `timeout_ms` and the pool's `max_live_workers` quota.
 fn render_on_persistent_child(
     ctx: &WorkerSupervisorContext,
     persistent_child: &mut Option<PersistentDecompWorker>,
     task: &ScheduledTask,
     timeout_ms: u64,
 ) -> FunctionRenderResult {
-    let infrastructure = |message: String| {
-        task.render(|func| make_internal_error_result(&ctx.binary, func, message, ctx.config))
+    let infrastructure = |kind: InfrastructureFailureKind, message: String| {
+        task.render(|func| {
+            make_infrastructure_error_result(&ctx.binary, func, kind, message, ctx.config)
+        })
     };
+    sync_cancel(&ctx.cancel, &ctx.batch_token);
+    if ctx.batch_token.is_cancelled() {
+        return infrastructure(
+            InfrastructureFailureKind::Cancelled,
+            "decompilation cancelled before worker execution".to_string(),
+        );
+    }
+
     if persistent_child.is_none() {
         // Reuse one `stack_size_bytes` thread across tasks so thread-local
         // SLEIGH/type caches stay warm and we avoid per-function 32 MiB
-        // thread creation, while still replacing a wedged child.
+        // thread creation, while keeping even timed-out threads strictly
+        // bounded under `max_live_workers`.
         match PersistentDecompWorker::spawn(
             ctx.worker_idx,
             Arc::clone(&ctx.binary),
             Arc::clone(&ctx.facts),
             ctx.config,
             ctx.stack_size_bytes,
+            Arc::clone(&ctx.slot_tracker),
+            Arc::clone(&ctx.render_fn),
         ) {
             Ok(worker) => *persistent_child = Some(worker),
-            Err(err) => return infrastructure(format!("failed to spawn render worker: {err}")),
+            Err(WorkerSpawnError::QuotaExhausted) => {
+                return infrastructure(
+                    InfrastructureFailureKind::WorkerUnavailable,
+                    format!(
+                        "decompiler worker concurrency quota exhausted (max_live_workers={})",
+                        ctx.policy.max_live_workers
+                    ),
+                );
+            }
+            Err(WorkerSpawnError::Io(err)) => {
+                return infrastructure(
+                    InfrastructureFailureKind::WorkerInternalError,
+                    format!("failed to spawn render worker: {err}"),
+                );
+            }
         }
     }
+
+    let task_token = ctx
+        .batch_token
+        .child(Some(Duration::from_millis(timeout_ms)));
     let worker = persistent_child
         .as_mut()
         .expect("persistent worker initialized");
-    if worker.request_tx.send(task.clone()).is_err() {
+    if worker
+        .request_tx
+        .send((task.clone(), task_token.clone()))
+        .is_err()
+    {
         if let Some(dead) = persistent_child.take() {
             dead.shutdown();
         }
-        return infrastructure("worker thread exited before receiving a render task".to_string());
+        return infrastructure(
+            InfrastructureFailureKind::WorkerInternalError,
+            "worker thread exited before receiving a render task".to_string(),
+        );
     }
-    match worker
-        .result_rx
-        .recv_timeout(Duration::from_millis(timeout_ms))
-    {
-        Ok(result) if task.owns(&result) => result,
-        Ok(_) => {
-            if let Some(child) = persistent_child.take() {
-                child.detach();
+    match recv_with_cancellation(&worker.result_rx, &task_token) {
+        Ok(result) if task.owns(&result) => {
+            sync_cancel(&ctx.cancel, &task_token);
+            if let Err(reason) = task_token.check() {
+                match reason {
+                    CancellationReason::TimedOut => task.render(|func| {
+                        make_aborted_render_result(
+                            &ctx.binary,
+                            func,
+                            AbortedRenderKind::AnalysisTimedOut,
+                            render_timeout_message(timeout_ms),
+                            ctx.config,
+                        )
+                    }),
+                    CancellationReason::Cancelled => infrastructure(
+                        InfrastructureFailureKind::Cancelled,
+                        "decompilation cancelled before publishing result".to_string(),
+                    ),
+                }
+            } else {
+                result
             }
-            infrastructure(format!(
-                "worker child returned a result not rendered for {:?}",
-                task.task_id
-            ))
         }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            // Detach without joining; the next task spawns a fresh child.
+        Ok(_) => {
+            task_token.cancel();
             if let Some(child) = persistent_child.take() {
-                child.detach();
+                child.cancel_and_release(ctx.policy.grace_period);
+            }
+            infrastructure(
+                InfrastructureFailureKind::WorkerInternalError,
+                format!(
+                    "worker child returned a result not rendered for {:?}",
+                    task.task_id
+                ),
+            )
+        }
+        Err(RecvOrCancel::TimedOut) => {
+            task_token.mark_timed_out();
+            if let Some(child) = persistent_child.take() {
+                child.cancel_and_release(ctx.policy.grace_period);
             }
             task.render(|func| {
                 make_aborted_render_result(
@@ -869,11 +1390,24 @@ fn render_on_persistent_child(
                 )
             })
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
+        Err(RecvOrCancel::Cancelled) => {
+            task_token.cancel();
+            if let Some(child) = persistent_child.take() {
+                child.cancel_and_release(ctx.policy.grace_period);
+            }
+            infrastructure(
+                InfrastructureFailureKind::Cancelled,
+                "decompilation worker cancelled".to_string(),
+            )
+        }
+        Err(RecvOrCancel::Disconnected) => {
             if let Some(dead) = persistent_child.take() {
                 dead.shutdown();
             }
-            infrastructure("worker thread exited before returning a render result".to_string())
+            infrastructure(
+                InfrastructureFailureKind::WorkerInternalError,
+                "worker thread exited before returning a render result".to_string(),
+            )
         }
     }
 }
@@ -888,8 +1422,16 @@ fn spawn_production_supervisor(
     }
     builder.spawn(move || {
         let mut persistent_child: Option<PersistentDecompWorker> = None;
+        let _no_timeout_guard = if ctx.timeout_ms.is_none() {
+            ctx.slot_tracker
+                .try_acquire_slot()
+                .map(WorkerSlotPermit::into_guard)
+        } else {
+            None
+        };
         loop {
-            if ctx.cancel.load(Ordering::Acquire) || ctx.stop_dispatch.load(Ordering::Acquire) {
+            sync_cancel(&ctx.cancel, &ctx.batch_token);
+            if ctx.batch_token.is_cancelled() || ctx.stop_dispatch.load(Ordering::Acquire) {
                 break;
             }
             let task = match ctx.task_rx.lock() {
@@ -897,7 +1439,8 @@ fn spawn_production_supervisor(
                 Err(_) => break,
             };
             let Ok(task) = task else { break };
-            if ctx.cancel.load(Ordering::Acquire) {
+            sync_cancel(&ctx.cancel, &ctx.batch_token);
+            if ctx.batch_token.is_cancelled() {
                 ctx.progress.mark_cancelled(task.task_id, ctx.worker);
                 break;
             }
@@ -913,14 +1456,26 @@ fn spawn_production_supervisor(
             let rendered = if let Some(timeout_ms) = ctx.timeout_ms {
                 render_on_persistent_child(&ctx, &mut persistent_child, &task, timeout_ms)
             } else {
-                task.render(|func| {
-                    render_one_function_catching_panic(
-                        ctx.binary.as_ref(),
-                        ctx.facts.as_ref(),
-                        func,
-                        ctx.config,
-                    )
-                })
+                let task_token = ctx.batch_token.child(None);
+                let out = task.render(|func| {
+                    with_cancellation_scope(task_token.clone(), || {
+                        (ctx.render_fn)(ctx.binary.as_ref(), ctx.facts.as_ref(), func, ctx.config)
+                    })
+                });
+                sync_cancel(&ctx.cancel, &task_token);
+                if task_token.is_cancelled() {
+                    task.render(|func| {
+                        make_infrastructure_error_result(
+                            &ctx.binary,
+                            func,
+                            InfrastructureFailureKind::Cancelled,
+                            "decompilation cancelled before publishing result".to_string(),
+                            ctx.config,
+                        )
+                    })
+                } else {
+                    out
+                }
             };
             if ctx
                 .result_tx
@@ -977,22 +1532,68 @@ pub(crate) fn run_sequential_batch(
     config: RenderConfig,
     stack_size_bytes: usize,
 ) -> BatchFanoutReport {
+    run_sequential_batch_with_policy(
+        binary,
+        facts,
+        functions,
+        config,
+        stack_size_bytes,
+        WorkerLifecyclePolicy::for_workers(1),
+        CancellationToken::new(),
+        production_render_fn(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_sequential_batch_with_policy(
+    binary: Arc<LoadedBinary>,
+    facts: Arc<FactStore>,
+    functions: &[FunctionInfo],
+    config: RenderConfig,
+    stack_size_bytes: usize,
+    policy: WorkerLifecyclePolicy,
+    batch_token: CancellationToken,
+    render_fn: RenderFn,
+) -> BatchFanoutReport {
     let mut ledger = BatchTaskLedger::new(functions);
     let progress = BatchProgressTracker::new(functions.len());
+    let tracker = WorkerSlotTracker::new(policy.max_live_workers);
 
     for idx in 0..functions.len() {
         let task = ledger.task(BatchTaskId(idx));
+        if batch_token.is_cancelled() {
+            if progress.mark_queued(task.task_id) {
+                progress.mark_cancelled(task.task_id, WorkerId::COORDINATOR);
+            }
+            continue;
+        }
+        let binary_for_task = Arc::clone(&binary);
+        let facts_for_task = Arc::clone(&facts);
+        let render_fn_for_task = Arc::clone(&render_fn);
         let _ = run_task_on_coordinator(
             &mut ledger,
             &progress,
             &task,
             |func| {
-                render_one_function_on_large_stack(
-                    Arc::clone(&binary),
-                    Arc::clone(&facts),
+                let func_owned = func.clone();
+                let binary_for_render = Arc::clone(&binary_for_task);
+                let facts_for_render = Arc::clone(&facts_for_task);
+                render_on_large_stack_with_pool(
+                    Arc::clone(&binary_for_task),
                     func,
                     config,
                     stack_size_bytes,
+                    &tracker,
+                    &batch_token,
+                    policy,
+                    move || {
+                        render_fn_for_task(
+                            binary_for_render.as_ref(),
+                            facts_for_render.as_ref(),
+                            &func_owned,
+                            config,
+                        )
+                    },
                 )
             },
             &mut |_, _| Ok(()),
@@ -1001,7 +1602,13 @@ pub(crate) fn run_sequential_batch(
         );
     }
 
-    ledger.reconcile_missing(&progress, false, binary.as_ref(), config);
+    ledger.reconcile_missing(
+        &progress,
+        batch_token.is_cancelled(),
+        binary.as_ref(),
+        config,
+    );
+    ledger.lifecycle = tracker.shutdown_drain(policy.shutdown_grace);
     ledger.into_report(&progress)
 }
 
@@ -1013,7 +1620,32 @@ pub(crate) fn run_worker_fanout_fanin(
     worker_count: usize,
     stack_size_bytes: usize,
 ) -> BatchFanoutReport {
-    run_worker_fanout_fanin_with_hooks(
+    run_worker_fanout_fanin_with_policy(
+        binary,
+        facts,
+        functions,
+        config,
+        worker_count,
+        stack_size_bytes,
+        WorkerLifecyclePolicy::for_workers(worker_count),
+        CancellationToken::new(),
+        production_render_fn(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_worker_fanout_fanin_with_policy(
+    binary: Arc<LoadedBinary>,
+    facts: Arc<FactStore>,
+    functions: &[FunctionInfo],
+    config: RenderConfig,
+    worker_count: usize,
+    stack_size_bytes: usize,
+    policy: WorkerLifecyclePolicy,
+    batch_token: CancellationToken,
+    render_fn: RenderFn,
+) -> BatchFanoutReport {
+    run_worker_fanout_fanin_with_hooks_and_policy(
         binary,
         facts,
         functions,
@@ -1022,10 +1654,14 @@ pub(crate) fn run_worker_fanout_fanin(
         stack_size_bytes,
         spawn_production_supervisor,
         Arc::new(AtomicBool::new(false)),
+        batch_token,
+        policy,
+        render_fn,
         |_, _| Ok(()),
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn run_worker_fanout_fanin_with_hooks<S, C>(
     binary: Arc<LoadedBinary>,
@@ -1034,8 +1670,43 @@ fn run_worker_fanout_fanin_with_hooks<S, C>(
     config: RenderConfig,
     worker_count: usize,
     stack_size_bytes: usize,
+    spawn_supervisor: S,
+    cancel: Arc<AtomicBool>,
+    on_result: C,
+) -> BatchFanoutReport
+where
+    S: FnMut(WorkerSupervisorContext) -> Result<thread::JoinHandle<()>, std::io::Error>,
+    C: FnMut(BatchTaskId, &FunctionRenderResult) -> Result<(), String>,
+{
+    run_worker_fanout_fanin_with_hooks_and_policy(
+        binary,
+        facts,
+        functions,
+        config,
+        worker_count,
+        stack_size_bytes,
+        spawn_supervisor,
+        cancel,
+        CancellationToken::new(),
+        WorkerLifecyclePolicy::for_workers(worker_count),
+        production_render_fn(),
+        on_result,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_worker_fanout_fanin_with_hooks_and_policy<S, C>(
+    binary: Arc<LoadedBinary>,
+    facts: Arc<FactStore>,
+    functions: &[FunctionInfo],
+    config: RenderConfig,
+    worker_count: usize,
+    stack_size_bytes: usize,
     mut spawn_supervisor: S,
     cancel: Arc<AtomicBool>,
+    batch_token: CancellationToken,
+    policy: WorkerLifecyclePolicy,
+    render_fn: RenderFn,
     mut on_result: C,
 ) -> BatchFanoutReport
 where
@@ -1045,6 +1716,7 @@ where
     let mut ledger = BatchTaskLedger::new(functions);
     let progress = Arc::new(BatchProgressTracker::new(functions.len()));
     let stop_dispatch = Arc::new(AtomicBool::new(false));
+    let slot_tracker = WorkerSlotTracker::new(policy.max_live_workers);
 
     // Keep both queues unbounded while enqueueing all tasks before receiving
     // results; bounded queues with enqueue-all-before-receive could deadlock
@@ -1070,6 +1742,10 @@ where
             progress: Arc::clone(&progress),
             cancel: Arc::clone(&cancel),
             stop_dispatch: Arc::clone(&stop_dispatch),
+            batch_token: batch_token.clone(),
+            slot_tracker: Arc::clone(&slot_tracker),
+            policy,
+            render_fn: Arc::clone(&render_fn),
         };
         match spawn_supervisor(ctx) {
             Ok(handle) => worker_handles.push(handle),
@@ -1091,43 +1767,99 @@ where
                 "failed to spawn decompilation worker threads ({err}); falling back to sequential rendering"
             );
         }
+        let can_use_large_stack_watchdog = ledger.spawn_errors == 0;
         for task in ledger.lpt_schedule() {
-            if cancel.load(Ordering::Acquire) || stop_dispatch.load(Ordering::Acquire) {
+            sync_cancel(&cancel, &batch_token);
+            if batch_token.is_cancelled() || stop_dispatch.load(Ordering::Acquire) {
                 break;
             }
-            if run_task_on_coordinator(
-                &mut ledger,
-                &progress,
-                &task,
-                |func| {
-                    render_one_function_catching_panic(
-                        binary.as_ref(),
-                        facts.as_ref(),
-                        func,
-                        config,
-                    )
-                },
-                &mut on_result,
-                binary.as_ref(),
-                config,
-            )
-            .is_err()
-            {
+            let step = if can_use_large_stack_watchdog && timeout_ms.is_some() {
+                let binary_for_task = Arc::clone(&binary);
+                let facts_for_task = Arc::clone(&facts);
+                let render_fn_for_task = Arc::clone(&render_fn);
+                run_task_on_coordinator(
+                    &mut ledger,
+                    &progress,
+                    &task,
+                    |func| {
+                        let func_owned = func.clone();
+                        let binary_for_render = Arc::clone(&binary_for_task);
+                        let facts_for_render = Arc::clone(&facts_for_task);
+                        render_on_large_stack_with_pool(
+                            Arc::clone(&binary_for_task),
+                            func,
+                            config,
+                            stack_size_bytes,
+                            &slot_tracker,
+                            &batch_token,
+                            policy,
+                            move || {
+                                render_fn_for_task(
+                                    binary_for_render.as_ref(),
+                                    facts_for_render.as_ref(),
+                                    &func_owned,
+                                    config,
+                                )
+                            },
+                        )
+                    },
+                    &mut on_result,
+                    binary.as_ref(),
+                    config,
+                )
+            } else {
+                let task_token = batch_token.child(timeout_ms.map(Duration::from_millis));
+                run_task_on_coordinator(
+                    &mut ledger,
+                    &progress,
+                    &task,
+                    |func| {
+                        let out = with_cancellation_scope(task_token.clone(), || {
+                            render_fn(binary.as_ref(), facts.as_ref(), func, config)
+                        });
+                        sync_cancel(&cancel, &task_token);
+                        match task_token.check() {
+                            Err(CancellationReason::TimedOut) => make_aborted_render_result(
+                                binary.as_ref(),
+                                func,
+                                AbortedRenderKind::AnalysisTimedOut,
+                                render_timeout_message(timeout_ms.unwrap_or(0)),
+                                config,
+                            ),
+                            Err(CancellationReason::Cancelled) => make_infrastructure_error_result(
+                                binary.as_ref(),
+                                func,
+                                InfrastructureFailureKind::Cancelled,
+                                "decompilation cancelled before publishing result".to_string(),
+                                config,
+                            ),
+                            Ok(()) => out,
+                        }
+                    },
+                    &mut on_result,
+                    binary.as_ref(),
+                    config,
+                )
+            };
+            if step.is_err() {
                 stop_dispatch.store(true, Ordering::Release);
                 break;
             }
         }
+        sync_cancel(&cancel, &batch_token);
         ledger.reconcile_missing(
             &progress,
-            cancel.load(Ordering::Acquire),
+            batch_token.is_cancelled(),
             binary.as_ref(),
             config,
         );
+        ledger.lifecycle = slot_tracker.shutdown_drain(policy.shutdown_grace);
         return ledger.into_report(&progress);
     }
 
     for task in ledger.lpt_schedule() {
-        if cancel.load(Ordering::Acquire) {
+        sync_cancel(&cancel, &batch_token);
+        if batch_token.is_cancelled() {
             break;
         }
         let task_id = task.task_id;
@@ -1155,6 +1887,7 @@ where
             .is_err()
         {
             stop_dispatch.store(true, Ordering::Release);
+            batch_token.cancel();
             break;
         }
     }
@@ -1166,12 +1899,14 @@ where
         }
     }
 
+    sync_cancel(&cancel, &batch_token);
     ledger.reconcile_missing(
         &progress,
-        cancel.load(Ordering::Acquire),
+        batch_token.is_cancelled(),
         binary.as_ref(),
         config,
     );
+    ledger.lifecycle = slot_tracker.shutdown_drain(policy.shutdown_grace);
     ledger.into_report(&progress)
 }
 
@@ -2281,6 +3016,318 @@ mod tests {
                 infra_row["fallback_reason"],
                 "rust_sleigh:worker_internal_error"
             );
+        }
+
+        #[test]
+        fn uncooperative_stuck_jobs_stay_bounded_and_release_arcs_after_unblock() {
+            use std::sync::Condvar;
+            use std::time::{Duration, Instant};
+
+            let functions: Vec<_> = (0..6)
+                .map(|i| make_func(&format!("stuck_{i}"), 0x1000 + (i as u64) * 0x20, 16))
+                .collect();
+            let (binary, facts) = make_test_binary(functions.clone());
+
+            let gate = Arc::new((Mutex::new(false), Condvar::new()));
+            let live_renders = Arc::new(AtomicUsize::new(0));
+            let peak_renders = Arc::new(AtomicUsize::new(0));
+
+            let gate_ref = Arc::clone(&gate);
+            let live_ref = Arc::clone(&live_renders);
+            let peak_ref = Arc::clone(&peak_renders);
+            let render_fn: super::super::RenderFn = Arc::new(move |_bin, _facts, func, _config| {
+                struct LiveGuard(Arc<AtomicUsize>);
+                impl Drop for LiveGuard {
+                    fn drop(&mut self) {
+                        self.0.fetch_sub(1, Ordering::AcqRel);
+                    }
+                }
+                let cur = live_ref.fetch_add(1, Ordering::AcqRel) + 1;
+                peak_ref.fetch_max(cur, Ordering::AcqRel);
+                let _guard = LiveGuard(Arc::clone(&live_ref));
+
+                let (lock, cv) = &*gate_ref;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = cv.wait(open).unwrap();
+                }
+                fake_success(func, "unblocked too late")
+            });
+
+            let mut config = test_config();
+            config.timeout_ms = Some(20);
+            let policy = super::super::WorkerLifecyclePolicy {
+                max_live_workers: 2,
+                grace_period: Duration::from_millis(10),
+                shutdown_grace: Duration::from_millis(10),
+            };
+
+            let report = super::super::run_worker_fanout_fanin_with_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                config,
+                2,
+                8 * 1024 * 1024,
+                policy,
+                fission_core::CancellationToken::new(),
+                render_fn,
+            );
+
+            assert_eq!(report.results.len(), 6);
+            assert_eq!(report.accounting.accepted, 6);
+            assert!(report.accounting.reconciles());
+            assert!(
+                report.accounting.peak_active_workers <= 2,
+                "peak_active_workers={}",
+                report.accounting.peak_active_workers
+            );
+            assert!(
+                peak_renders.load(Ordering::Acquire) <= 2,
+                "concurrent stuck renders exceeded cap: {}",
+                peak_renders.load(Ordering::Acquire)
+            );
+            assert_eq!(report.accounting.still_running_workers, 2);
+            assert!(
+                report.accounting.quota_exhausted_tasks >= 1,
+                "expected excess tasks to hit worker quota, accounting={:?}",
+                report.accounting
+            );
+            assert!(
+                report
+                    .results
+                    .iter()
+                    .all(|r| r.json_entry.get("code").is_some()
+                        && r.json_entry["fell_back"] == serde_json::json!(true)),
+                "stuck/exhausted batch must not emit non-fallback Success"
+            );
+            assert!(
+                report
+                    .results
+                    .iter()
+                    .any(|r| r.json_entry["job_status"] == "worker_unavailable"
+                        && r.json_entry["fallback_reason"] == "rust_sleigh:worker_unavailable")
+            );
+            // Retained Arcs are bounded by the 2 live workers + report's own provenance refs = none for binary/facts except 2 live workers + this test handle.
+            assert!(Arc::strong_count(&binary) <= 5);
+            assert!(Arc::strong_count(&facts) <= 3);
+
+            // Release the test barrier and verify the abandoned threads exit and drop all retained Arcs.
+            {
+                let (lock, cv) = &*gate;
+                *lock.lock().unwrap() = true;
+                cv.notify_all();
+            }
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while (live_renders.load(Ordering::Acquire) > 0
+                || Arc::strong_count(&binary) > 1
+                || Arc::strong_count(&facts) > 1)
+                && Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            drop(report);
+            assert_eq!(live_renders.load(Ordering::Acquire), 0);
+            assert_eq!(Arc::strong_count(&binary), 1);
+            assert_eq!(Arc::strong_count(&facts), 1);
+        }
+
+        #[test]
+        fn cooperatively_cancellable_slow_jobs_reclaim_slots_and_allow_later_success() {
+            use std::time::Duration;
+
+            let functions = vec![
+                make_func("slow_1", 0x1000, 40),
+                make_func("slow_2", 0x1020, 30),
+                make_func("slow_3", 0x1040, 20),
+                make_func("fast_4", 0x1060, 10),
+            ];
+            let (binary, facts) = make_test_binary(functions.clone());
+
+            let render_fn: super::super::RenderFn = Arc::new(|_bin, _facts, func, _config| {
+                if func.name.starts_with("slow_") {
+                    while !fission_core::cancellation::is_current_cancelled() {
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    return fake_success(func, "should never publish cancelled slow result");
+                }
+                fake_success(func, "fast_ok")
+            });
+
+            let mut config = test_config();
+            config.timeout_ms = Some(25);
+            let policy = super::super::WorkerLifecyclePolicy {
+                max_live_workers: 1,
+                grace_period: Duration::from_millis(80),
+                shutdown_grace: Duration::from_millis(100),
+            };
+
+            let report = super::super::run_worker_fanout_fanin_with_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                config,
+                1,
+                8 * 1024 * 1024,
+                policy,
+                fission_core::CancellationToken::new(),
+                render_fn,
+            );
+
+            assert_eq!(report.results.len(), 4);
+            assert_eq!(report.accounting.accepted, 4);
+            assert!(report.accounting.reconciles());
+            assert_eq!(report.accounting.peak_active_workers, 1);
+            assert_eq!(report.accounting.still_running_workers, 0);
+            assert_eq!(report.accounting.quota_exhausted_tasks, 0);
+            assert!(
+                report.accounting.reclaimed_workers >= 3,
+                "reclaimed_workers={}",
+                report.accounting.reclaimed_workers
+            );
+            for row in &report.results[..3] {
+                assert_eq!(row.json_entry["failure_domain"], "analysis");
+                assert_eq!(row.json_entry["analysis_status"], "timed_out");
+            }
+            assert_eq!(report.results[3].plain_output, "fast_ok");
+            assert_eq!(report.results[3].json_entry["fell_back"], false);
+
+            drop(report);
+            assert_eq!(Arc::strong_count(&binary), 1);
+            assert_eq!(Arc::strong_count(&facts), 1);
+        }
+
+        #[test]
+        fn unified_timeout_and_zero_timeout_semantics_across_all_lanes() {
+            use std::time::Duration;
+
+            let functions = vec![make_func("coop_slow", 0x1000, 16)];
+            let (binary, facts) = make_test_binary(functions.clone());
+
+            let coop_render: super::super::RenderFn = Arc::new(|_bin, _facts, func, _config| {
+                for _ in 0..40 {
+                    if fission_core::cancellation::is_current_cancelled() {
+                        return fake_success(func, "late cancelled success");
+                    }
+                    thread::sleep(Duration::from_millis(2));
+                }
+                fake_success(func, "completed")
+            });
+
+            // 1. Sequential batch honors wall timeout cleanly.
+            let mut timed_cfg = test_config();
+            timed_cfg.timeout_ms = Some(15);
+            let policy = super::super::WorkerLifecyclePolicy {
+                max_live_workers: 1,
+                grace_period: Duration::from_millis(80),
+                shutdown_grace: Duration::from_millis(80),
+            };
+            let seq_timed = super::super::run_sequential_batch_with_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                timed_cfg,
+                8 * 1024 * 1024,
+                policy,
+                fission_core::CancellationToken::new(),
+                Arc::clone(&coop_render),
+            );
+            assert_eq!(
+                seq_timed.results[0].json_entry["analysis_status"],
+                "timed_out"
+            );
+            assert_eq!(seq_timed.accounting.still_running_workers, 0);
+
+            // 2. Sequential fallback (worker_count == 0) honors wall timeout cleanly.
+            let zero_worker_timed = super::super::run_worker_fanout_fanin_with_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                timed_cfg,
+                0,
+                8 * 1024 * 1024,
+                policy,
+                fission_core::CancellationToken::new(),
+                Arc::clone(&coop_render),
+            );
+            assert!(zero_worker_timed.accounting.sequential_fallback);
+            assert_eq!(
+                zero_worker_timed.results[0].json_entry["analysis_status"],
+                "timed_out"
+            );
+
+            // 3. Coordinator fallback after OS spawn failure still honors cooperative timeout.
+            let spawn_fail_timed = super::super::run_worker_fanout_fanin_with_hooks_and_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                timed_cfg,
+                1,
+                8 * 1024 * 1024,
+                |_| {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "simulated spawn fail",
+                    ))
+                },
+                Arc::new(AtomicBool::new(false)),
+                fission_core::CancellationToken::new(),
+                policy,
+                Arc::clone(&coop_render),
+                |_, _| Ok(()),
+            );
+            assert!(spawn_fail_timed.accounting.sequential_fallback);
+            assert_eq!(spawn_fail_timed.accounting.spawn_errors, 1);
+            assert_eq!(
+                spawn_fail_timed.results[0].json_entry["analysis_status"],
+                "timed_out"
+            );
+
+            // 4. `--timeout-ms=0` disables wall deadline so a slow job finishes, while explicit cancel still aborts it.
+            let mut zero_cfg = test_config();
+            zero_cfg.timeout_ms = Some(0);
+            let zero_ok = super::super::run_worker_fanout_fanin_with_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                zero_cfg,
+                1,
+                8 * 1024 * 1024,
+                policy,
+                fission_core::CancellationToken::new(),
+                Arc::clone(&coop_render),
+            );
+            assert_eq!(zero_ok.results[0].plain_output, "completed");
+
+            let cancel_token = fission_core::CancellationToken::new();
+            let canceller = cancel_token.clone();
+            let race_render: super::super::RenderFn =
+                Arc::new(move |_bin, _facts, func, _config| {
+                    canceller.cancel();
+                    fake_success(func, "must not publish cancelled success")
+                });
+            let cancelled = super::super::run_worker_fanout_fanin_with_policy(
+                Arc::clone(&binary),
+                Arc::clone(&facts),
+                &functions,
+                zero_cfg,
+                1,
+                8 * 1024 * 1024,
+                policy,
+                cancel_token,
+                race_render,
+            );
+            assert_eq!(cancelled.results[0].json_entry["job_status"], "cancelled");
+
+            // 5. Direct single-function large-stack wrapper returns cleanest outcome cleanly.
+            let direct = super::super::render_one_function_on_large_stack(
+                binary,
+                facts,
+                &functions[0],
+                test_config(),
+                8 * 1024 * 1024,
+            );
+            assert_eq!(direct.address, 0x1000);
         }
     }
 

@@ -121,6 +121,10 @@ impl IfLoweringBudget {
         if self.tripped || !self.enabled {
             return self.tripped;
         }
+        if fission_core::cancellation::is_current_cancelled() {
+            self.tripped = true;
+            return true;
+        }
         self.subcalls += 1;
         self.usage.condition_recovery_subcalls.observe(
             self.subcalls as u64,

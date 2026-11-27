@@ -5,6 +5,7 @@ pub(crate) fn extract_fallback_kind(reason: Option<&str>) -> Option<&'static str
     let prefix = reason.split(':').next()?.trim().to_ascii_lowercase();
     match prefix.as_str() {
         "nir_timeout" | "preview_timeout" => Some("nir_timeout"),
+        "nir_cancelled" | "preview_cancelled" => Some("nir_cancelled"),
         "nir_unsupported" | "preview_unsupported" => Some("nir_unsupported"),
         "native_pcode_failure" => Some("native_pcode_failure"),
         "legacy_fallback" => Some("legacy_fallback"),
@@ -16,7 +17,9 @@ pub(crate) fn extract_fallback_kind(reason: Option<&str>) -> Option<&'static str
 pub(crate) fn extract_refined_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
     let reason = reason?;
     match extract_fallback_kind(Some(reason)) {
-        Some("nir_timeout") | Some("nir_unsupported") => Some(classify_nir_failure_refined(reason)),
+        Some("nir_timeout") | Some("nir_cancelled") | Some("nir_unsupported") => {
+            Some(classify_nir_failure_refined(reason))
+        }
         _ => None,
     }
 }
@@ -45,6 +48,12 @@ pub fn classify_nir_failure_refined(reason: &str) -> &'static str {
         || lower.contains("worker timed out")
     {
         return "nir_timeout";
+    }
+    if lower.contains("nir_cancelled")
+        || lower.contains("preview_cancelled")
+        || lower.contains("worker cancelled")
+    {
+        return "nir_cancelled";
     }
     if lower.contains("unsupported architecture")
         || lower.contains("currently supports pe x64 only")
@@ -109,6 +118,7 @@ pub fn classify_nir_failure_refined(reason: &str) -> &'static str {
 pub fn classify_nir_failure(reason: &str) -> &'static str {
     match classify_nir_failure_refined(reason) {
         "nir_timeout" => "nir_timeout",
+        "nir_cancelled" => "nir_cancelled",
         _ => "nir_unsupported",
     }
 }
@@ -125,6 +135,8 @@ pub fn classify_native_failure_kind(error: &str) -> &'static str {
     let lower = error.to_ascii_lowercase();
     if lower.contains("nir_timeout") || lower.contains("preview_timeout") {
         "nir_timeout"
+    } else if lower.contains("nir_cancelled") || lower.contains("preview_cancelled") {
+        "nir_cancelled"
     } else if lower.contains("could not find op at target address")
         || lower.contains("ghidra lowlevelerror")
     {

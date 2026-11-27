@@ -7,9 +7,36 @@ use crate::rust_sleigh::render_finish::{
 use crate::rust_sleigh::{
     RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
 };
+use fission_core::cancellation::{
+    CancellationReason, CancellationToken, check_current_cancellation, current_cancellation_token,
+    enter_cancellation_scope, is_current_cancelled,
+};
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+pub(crate) fn format_cancellation_error(
+    reason: CancellationReason,
+    stage: &str,
+    timeout_ms: Option<u64>,
+) -> String {
+    match reason {
+        CancellationReason::TimedOut => match timeout_ms.filter(|ms| *ms > 0) {
+            Some(ms) => {
+                format!("nir_timeout: Fission NIR pipeline timed out after {ms}ms ({stage})")
+            }
+            None => format!("nir_timeout: Fission NIR pipeline timed out ({stage})"),
+        },
+        CancellationReason::Cancelled => {
+            format!("nir_cancelled: Fission NIR pipeline cancelled ({stage})")
+        }
+    }
+}
+
+fn check_pipeline_cancellation(stage: &str, timeout_ms: Option<u64>) -> Result<(), String> {
+    check_current_cancellation()
+        .map_err(|reason| format_cancellation_error(reason, stage, timeout_ms))
+}
 
 /// How many bytes and instructions to decode for the function at
 /// `entry_address`.
@@ -133,6 +160,15 @@ pub fn decompile_with_rust_sleigh_with_facts(
     max_instructions: Option<u32>,
 ) -> Result<RustSleighDecompileResult, String> {
     let start = Instant::now();
+    let stage_timeout = config.nir_timeout_ms.filter(|&ms| ms > 0);
+    let timeout_duration = stage_timeout.map(Duration::from_millis);
+    let request_token = match current_cancellation_token() {
+        Some(parent) => parent.child(timeout_duration),
+        None => CancellationToken::with_deadline(timeout_duration.map(|d| start + d)),
+    };
+    let _cancel_guard = enter_cancellation_scope(request_token);
+    check_pipeline_cancellation("before_setup", stage_timeout)?;
+
     let entry_address = binary
         .function_at(address)
         .map(|f| f.address)
@@ -154,9 +190,11 @@ pub fn decompile_with_rust_sleigh_with_facts(
     let mut evidence = RustSleighPipelineEvidence::new(entry_address, max_bytes, instruction_limit);
     evidence.wrapper_probe_attempted = config.enable_wrapper_contraction_probe;
 
+    check_pipeline_cancellation("before_wrapper_probe", stage_timeout)?;
     if let Some(mut summary_result) =
         probe_wrapper_contraction(binary, entry_address, name, function_size, config, start)?
     {
+        check_pipeline_cancellation("after_wrapper_probe", stage_timeout)?;
         evidence.wrapper_probe_matched = true;
         evidence
             .pipeline_stage_status
@@ -170,6 +208,7 @@ pub fn decompile_with_rust_sleigh_with_facts(
     // same as FID matching uses) -- see `FactStore::get_cached_decoded_
     // function`'s doc comment for why a `strict_function` request must not
     // reuse this cache.
+    check_pipeline_cancellation("before_decode", stage_timeout)?;
     let cached_decoded = config
         .continue_past_indirect_branch
         .then(|| facts.get_cached_decoded_function(entry_address))
@@ -194,6 +233,7 @@ pub fn decompile_with_rust_sleigh_with_facts(
             return Err(fail.message);
         }
     };
+    check_pipeline_cancellation("after_decode", stage_timeout)?;
 
     evidence.decode_attempt_count = diag.attempts;
     evidence.decode_stop_reason = diag.stop_reason.clone();
@@ -214,11 +254,18 @@ pub fn decompile_with_rust_sleigh_with_facts(
         userops.clone(),
         &mut evidence,
     ) {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            check_pipeline_cancellation("after_nir_render", stage_timeout)?;
+            Ok(result)
+        }
         Err(err)
             if config.continue_past_indirect_branch
+                && !is_current_cancelled()
+                && !err.contains("nir_timeout")
+                && !err.contains("nir_cancelled")
                 && should_retry_with_strict_indirect_stop(&err) =>
         {
+            check_pipeline_cancellation("before_strict_retry", stage_timeout)?;
             evidence.strict_indirect_retry_attempted = true;
             evidence
                 .pipeline_stage_status

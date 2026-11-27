@@ -7,9 +7,11 @@
 #![allow(clippy::ptr_arg)]
 
 pub mod architecture;
+pub mod cancellation;
 pub mod common;
 pub mod constants;
 pub mod core;
+pub use crate::cancellation::{CancellationReason, CancellationScopeGuard, CancellationToken};
 pub use crate::core::config;
 pub use crate::core::config_store;
 // Re-export core::constants as core_constants to avoid name collision

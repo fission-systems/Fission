@@ -325,7 +325,8 @@ pub(crate) fn make_aborted_render_result(
             fallback::make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &message)
         }
         record::AbortedRenderKind::Infrastructure(
-            record::InfrastructureFailureKind::NotStarted
+            record::InfrastructureFailureKind::WorkerUnavailable
+            | record::InfrastructureFailureKind::NotStarted
             | record::InfrastructureFailureKind::Cancelled,
         ) => None,
     };
@@ -415,6 +416,36 @@ pub(crate) fn render_one_function_inner(
         config.prehir,
     ) {
         Ok(rendered) => {
+            if let Err(reason) = fission_core::cancellation::check_current_cancellation() {
+                return match reason {
+                    fission_core::cancellation::CancellationReason::TimedOut => {
+                        let message = match config.timeout_ms.filter(|ms| *ms > 0) {
+                            Some(ms) => {
+                                format!(
+                                    "preview_timeout: Rust-Sleigh render timed out after {ms}ms"
+                                )
+                            }
+                            None => "preview_timeout: Rust-Sleigh render timed out".to_string(),
+                        };
+                        make_aborted_render_result(
+                            binary,
+                            func,
+                            record::AbortedRenderKind::AnalysisTimedOut,
+                            message,
+                            config,
+                        )
+                    }
+                    fission_core::cancellation::CancellationReason::Cancelled => {
+                        make_infrastructure_error_result(
+                            binary,
+                            func,
+                            record::InfrastructureFailureKind::Cancelled,
+                            "decompilation cancelled before publishing result".to_string(),
+                            config,
+                        )
+                    }
+                };
+            }
             let decomp_sec = start.elapsed().as_secs_f64();
             let code = apply_output_filters(&rendered.code, config);
             let line_mappings =
@@ -456,8 +487,52 @@ pub(crate) fn render_one_function_inner(
             record_into_function_render_result(record, debug_bundle, config.benchmark)
         }
         Err(err) => {
-            let decomp_sec = start.elapsed().as_secs_f64();
             let error_text = err.to_string();
+            match fission_core::cancellation::check_current_cancellation() {
+                Err(fission_core::cancellation::CancellationReason::Cancelled) => {
+                    return make_infrastructure_error_result(
+                        binary,
+                        func,
+                        record::InfrastructureFailureKind::Cancelled,
+                        error_text,
+                        config,
+                    );
+                }
+                Err(fission_core::cancellation::CancellationReason::TimedOut) => {
+                    return make_aborted_render_result(
+                        binary,
+                        func,
+                        record::AbortedRenderKind::AnalysisTimedOut,
+                        error_text,
+                        config,
+                    );
+                }
+                Ok(()) => {
+                    if error_text.contains("nir_timeout:")
+                        || error_text.contains("preview_timeout:")
+                    {
+                        return make_aborted_render_result(
+                            binary,
+                            func,
+                            record::AbortedRenderKind::AnalysisTimedOut,
+                            error_text,
+                            config,
+                        );
+                    }
+                    if error_text.contains("nir_cancelled:")
+                        || error_text.contains("preview_cancelled:")
+                    {
+                        return make_infrastructure_error_result(
+                            binary,
+                            func,
+                            record::InfrastructureFailureKind::Cancelled,
+                            error_text,
+                            config,
+                        );
+                    }
+                }
+            }
+            let decomp_sec = start.elapsed().as_secs_f64();
 
             if let Some(fallback_code) = fallback::make_assembly_fallback(
                 binary,

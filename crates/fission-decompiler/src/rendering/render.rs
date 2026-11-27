@@ -29,6 +29,43 @@ fn surface_render_panic(address: u64, payload: &(dyn std::any::Any + Send)) -> S
     format!("nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}")
 }
 
+fn check_render_cancellation(
+    address: u64,
+    render_start: Instant,
+    timeout_ms: Option<u64>,
+    stage: &str,
+) -> Result<(), String> {
+    match fission_core::cancellation::check_current_cancellation() {
+        Ok(()) => {}
+        Err(fission_core::cancellation::CancellationReason::Cancelled) => {
+            nir_diag_stage(address, "render_preview_cancelled", render_start);
+            return Err(format!(
+                "nir_cancelled: Fission NIR render cancelled ({stage})"
+            ));
+        }
+        Err(fission_core::cancellation::CancellationReason::TimedOut) => {
+            nir_diag_stage(address, "render_preview_timeout", render_start);
+            return Err(match timeout_ms {
+                Some(timeout) => {
+                    format!(
+                        "nir_timeout: Fission NIR direct render timed out after {timeout}ms ({stage})"
+                    )
+                }
+                None => format!("nir_timeout: Fission NIR direct render timed out ({stage})"),
+            });
+        }
+    }
+    if let Some(timeout) = timeout_ms {
+        if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
+            nir_diag_stage(address, "render_preview_timeout", render_start);
+            return Err(format!(
+                "nir_timeout: Fission NIR direct render timed out after {timeout}ms ({stage})"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn optimize_pcode_with_backup(
     pcode: &mut PcodeFunction,
     run_optimize: impl FnOnce(&mut PcodeFunction),
@@ -145,10 +182,39 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context_preserving_options<'bin>
     name: &str,
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
+    decomp_ctx: crate::context::DecompContext<'bin>,
+    base_options: NirRenderOptions,
+    region_linearize_structuring: bool,
+    force_linear_structuring: bool,
+) -> Result<Option<(crate::NirDecompileOutput, FactStore)>, (NirRenderOptions, String)> {
+    render_nir_from_pcode_with_decomp_context_and_isolation(
+        pcode,
+        binary,
+        address,
+        name,
+        enforce_auto_gate,
+        timeout_ms,
+        decomp_ctx,
+        base_options,
+        region_linearize_structuring,
+        force_linear_structuring,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_nir_from_pcode_with_decomp_context_and_isolation<'bin>(
+    pcode: &PcodeFunction,
+    binary: &'bin LoadedBinary,
+    address: u64,
+    name: &str,
+    enforce_auto_gate: bool,
+    timeout_ms: Option<u64>,
     mut decomp_ctx: crate::context::DecompContext<'bin>,
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
+    subprocess_isolation: bool,
 ) -> Result<Option<(crate::NirDecompileOutput, FactStore)>, (NirRenderOptions, String)> {
     if enforce_auto_gate && !auto_nir_admission_eligible(binary, pcode) {
         return Ok(None);
@@ -169,23 +235,99 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context_preserving_options<'bin>
     }
 
     let render_start = Instant::now();
-    let max_rounds = 3;
-
-    for round in 0..max_rounds {
-        if let Some(timeout) = timeout_ms {
-            if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
-                nir_diag_stage(address, "render_preview_timeout", render_start);
-                return Err((
-                    options,
-                    format!(
-                        "nir_timeout: Fission NIR direct render timed out after {timeout}ms at round {}",
-                        round + 1
-                    ),
-                ));
-            }
+    if subprocess_isolation && std::env::var_os("FISSION_FORCE_IN_PROCESS").is_none() {
+        if let Err(err) =
+            check_render_cancellation(address, render_start, timeout_ms, "before worker")
+        {
+            return Err((options, err));
         }
         decomp_ctx.begin_round();
         decomp_ctx.refine_type_context(pcode);
+        if let Err(err) =
+            check_render_cancellation(address, render_start, timeout_ms, "before worker serialize")
+        {
+            return Err((options, err));
+        }
+        let pcode_json = match serde_json::to_string(pcode) {
+            Ok(json) => json,
+            Err(err) => {
+                return Err((
+                    options,
+                    format!("mlil-preview pcode serialize failed: {err}"),
+                ));
+            }
+        };
+        let mut request_options = options.clone();
+        request_options.function_type_aliases =
+            decomp_ctx.type_context().function_type_aliases.clone();
+        let request = make_nir_request(
+            &pcode_json,
+            address,
+            name,
+            request_options,
+            decomp_ctx.type_context().clone(),
+        );
+        let remaining_ms = fission_core::cancellation::current_remaining_timeout()
+            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX).max(1))
+            .or(timeout_ms);
+        let worker_timeout_ms = nir_worker_timeout_ms(remaining_ms);
+        match execute_nir_worker_request(&request, worker_timeout_ms) {
+            Ok((code, build_stats, hint_stats)) => {
+                if let Err(err) =
+                    check_render_cancellation(address, render_start, timeout_ms, "after worker")
+                {
+                    return Err((options, err));
+                }
+                nir_diag_stage(address, "render_preview_worker_done", render_start);
+                let output = crate::NirDecompileOutput {
+                    code,
+                    line_mappings: Vec::new(),
+                    raw_hir: None,
+                    prehir: None,
+                    hir_function: None,
+                    printed_globals: Vec::new(),
+                    stack_slot_cfa_offsets: Default::default(),
+                    declared_callees: Default::default(),
+                    printed_hir: None,
+                    recovered_variables: None,
+                    build_stats,
+                    hint_stats,
+                };
+                return Ok(Some((output, decomp_ctx.into_facts())));
+            }
+            Err(err) if err == "nir worker unavailable" => {
+                nir_diag_event(address, "worker_unavailable", "falling back to in-process");
+            }
+            // A timed-out, cancelled, or crashed worker is isolated in the subprocess;
+            // never re-run the same workload in-process.
+            Err(err) => {
+                nir_diag_stage(address, "render_preview_worker_error", render_start);
+                return Err((options, err));
+            }
+        }
+    }
+
+    let max_rounds = 3;
+
+    for round in 0..max_rounds {
+        if let Err(err) = check_render_cancellation(
+            address,
+            render_start,
+            timeout_ms,
+            &format!("at round {}", round + 1),
+        ) {
+            return Err((options, err));
+        }
+        decomp_ctx.begin_round();
+        decomp_ctx.refine_type_context(pcode);
+        if let Err(err) = check_render_cancellation(
+            address,
+            render_start,
+            timeout_ms,
+            &format!("after refine round {}", round + 1),
+        ) {
+            return Err((options, err));
+        }
 
         let type_context_cloned = decomp_ctx.type_context().clone();
         match catch_unwind(AssertUnwindSafe(|| {
@@ -200,18 +342,22 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context_preserving_options<'bin>
             )
         })) {
             Ok(Ok(output)) => {
+                if let Err(err) = check_render_cancellation(
+                    address,
+                    render_start,
+                    timeout_ms,
+                    &format!("after render round {}", round + 1),
+                ) {
+                    return Err((options, err));
+                }
                 if decomp_ctx.hints_changed() && round < max_rounds - 1 {
-                    if let Some(timeout) = timeout_ms {
-                        if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
-                            nir_diag_stage(address, "render_preview_timeout", render_start);
-                            return Err((
-                                options,
-                                format!(
-                                    "nir_timeout: Fission NIR direct render timed out after {timeout}ms before feedback round {}",
-                                    round + 2
-                                ),
-                            ));
-                        }
+                    if let Err(err) = check_render_cancellation(
+                        address,
+                        render_start,
+                        timeout_ms,
+                        &format!("before feedback round {}", round + 2),
+                    ) {
+                        return Err((options, err));
                     }
                     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
                         eprintln!(
@@ -228,6 +374,14 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context_preserving_options<'bin>
                 return Ok(Some((output, decomp_ctx.into_facts())));
             }
             Ok(Err(err)) => {
+                if let Err(cancel_err) = check_render_cancellation(
+                    address,
+                    render_start,
+                    timeout_ms,
+                    &format!("after aborted round {}", round + 1),
+                ) {
+                    return Err((options, cancel_err));
+                }
                 let surfaced_error = err
                     .structuring_failure_kind()
                     .map(|kind| {
@@ -241,6 +395,14 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context_preserving_options<'bin>
                 return Err((options, surfaced_error));
             }
             Err(payload) => {
+                if let Err(cancel_err) = check_render_cancellation(
+                    address,
+                    render_start,
+                    timeout_ms,
+                    &format!("after panic round {}", round + 1),
+                ) {
+                    return Err((options, cancel_err));
+                }
                 nir_diag_stage(address, "render_preview_error", render_start);
                 return Err((options, surface_render_panic(address, payload.as_ref())));
             }
@@ -470,18 +632,17 @@ pub(crate) fn render_nir_from_json_with_type_context(
         }
     }
 
-    if let Some(timeout) = timeout_ms {
-        if parse_start.elapsed() >= std::time::Duration::from_millis(timeout) {
-            nir_diag_stage(address, "render_preview_timeout", parse_start);
-            return Err(format!(
-                "nir_timeout: Fission NIR render timed out after {timeout}ms before in-process render"
-            ));
-        }
-    }
+    check_render_cancellation(address, parse_start, timeout_ms, "before in-process render")?;
 
     match render_nir_request(&request) {
-        Ok(result) => Ok(Some(result)),
-        Err(err) => Err(err),
+        Ok(result) => {
+            check_render_cancellation(address, parse_start, timeout_ms, "after in-process render")?;
+            Ok(Some(result))
+        }
+        Err(err) => {
+            check_render_cancellation(address, parse_start, timeout_ms, "after in-process error")?;
+            Err(err)
+        }
     }
 }
 
@@ -628,5 +789,91 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(pcode.blocks[0].ops, vec![orig_op]);
+    }
+
+    #[test]
+    fn cancelled_scope_prevents_publishing_success_or_learned_facts() {
+        let load_spec = BinaryLoadSpec {
+            format: "ELF".to_string(),
+            image_base: 0x1000,
+            pair: LanguageCompilerSpecPair {
+                language_id: GhidraLanguageId("x86:LE:64:default".to_string()),
+                compiler_spec_id: CompilerSpecId("default".to_string()),
+            },
+            preferred: true,
+            source: "test".to_string(),
+        };
+        let binary =
+            LoadedBinaryBuilder::new("test_bin".to_string(), DataBuffer::Heap(vec![0xc3; 0x100]))
+                .format("ELF")
+                .image_base(0x1000)
+                .entry_point(0x1000)
+                .is_64bit(true)
+                .load_spec(load_spec)
+                .build()
+                .expect("build");
+        let fact_store = FactStore::default();
+        let pcode = PcodeFunction {
+            blocks: vec![fission_pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![fission_pcode::PcodeOp {
+                    seq_num: 0,
+                    opcode: fission_pcode::PcodeOpcode::Return,
+                    address: 0x1000,
+                    output: None,
+                    inputs: Vec::new(),
+                    asm_mnemonic: Some("RET".to_string()),
+                }],
+            }],
+        };
+
+        let cancelled = fission_core::CancellationToken::new();
+        cancelled.cancel();
+
+        let (selection, learned_facts) =
+            fission_core::cancellation::with_cancellation_scope(cancelled.clone(), || {
+                crate::routing::select_nir_output_from_pcode_with_learned_facts(
+                    &pcode,
+                    &binary,
+                    &fact_store,
+                    0x1000,
+                    "ret_fn",
+                    crate::engine::NirEngineMode::Nir,
+                    None,
+                    NirRenderOptions::default(),
+                )
+            })
+            .expect("selection call should convert cancellation into non-success");
+
+        assert!(selection.nir_code.is_none());
+        assert_eq!(selection.fallback_kind, Some("nir_cancelled"));
+        assert_eq!(selection.fallback_kind_refined, Some("nir_cancelled"));
+        assert!(learned_facts.is_none());
+
+        let isolated_err = fission_core::cancellation::with_cancellation_scope(cancelled, || {
+            let decomp_ctx =
+                crate::context::DecompContext::from_facts(&binary, FactStore::default(), 0x1000);
+            render_nir_from_pcode_with_decomp_context_and_isolation(
+                &pcode,
+                &binary,
+                0x1000,
+                "ret_fn",
+                false,
+                None,
+                decomp_ctx,
+                NirRenderOptions::default(),
+                false,
+                false,
+                true,
+            )
+        })
+        .expect_err("cancelled isolated render must fail closed");
+        assert!(
+            isolated_err.1.contains("nir_cancelled"),
+            "{}",
+            isolated_err.1
+        );
     }
 }

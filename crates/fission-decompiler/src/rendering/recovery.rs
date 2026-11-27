@@ -43,7 +43,9 @@ pub(crate) fn try_structuring_recovery(
     type_context: NirTypeContext,
     error: &str,
 ) -> Result<Option<NirSelection>, String> {
-    if classify_nir_failure_refined(error) != "nir_structuring_failure" {
+    if fission_core::cancellation::is_current_cancelled()
+        || classify_nir_failure_refined(error) != "nir_structuring_failure"
+    {
         return Ok(None);
     }
     let Some(signature) = structuring_failure_signature(error) else {
@@ -94,6 +96,9 @@ pub(crate) fn try_structuring_recovery(
         true,
     ) {
         Ok(Some((code, build_stats, hint_stats))) => {
+            if fission_core::cancellation::is_current_cancelled() {
+                return Ok(None);
+            }
             let merged_build_stats =
                 merge_optional_build_stats(build_stats, region_retry_build_stats);
             let mode = match outcome.mode {
@@ -147,7 +152,9 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
     base_options: NirRenderOptions,
     error: &str,
 ) -> Result<Option<(NirSelection, Option<FactStore>)>, String> {
-    if classify_nir_failure_refined(error) != "nir_structuring_failure" {
+    if fission_core::cancellation::is_current_cancelled()
+        || classify_nir_failure_refined(error) != "nir_structuring_failure"
+    {
         return Ok(None);
     }
     let Some(signature) = structuring_failure_signature(error) else {
@@ -171,6 +178,9 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
     );
     let region_retry_build_stats = match region_retry {
         Ok(Some((output, learned_facts))) => {
+            if fission_core::cancellation::is_current_cancelled() {
+                return Ok(None);
+            }
             let selection = NirRoutingResolver::nir_success_with_recovery(
                 output.code.clone(),
                 output.build_stats.clone(),
@@ -186,7 +196,12 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
             .with_render_output(output);
             return Ok(Some((selection, Some(learned_facts))));
         }
-        Ok(None) | Err(_) => None,
+        Ok(None) | Err(_) => {
+            if fission_core::cancellation::is_current_cancelled() {
+                return Ok(None);
+            }
+            None
+        }
     };
 
     match render_nir_from_pcode_with_decomp_context(
@@ -202,6 +217,9 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
         true,
     ) {
         Ok(Some((mut output, learned_facts))) => {
+            if fission_core::cancellation::is_current_cancelled() {
+                return Ok(None);
+            }
             let merged_build_stats =
                 merge_optional_build_stats(output.build_stats.clone(), region_retry_build_stats);
             output.build_stats = merged_build_stats.clone();

@@ -17,6 +17,43 @@ pub(crate) struct DecodeFailure {
     pub diag: DecodeDiag,
 }
 
+fn check_decode_cancellation(attempts: usize) -> Result<(), DecodeFailure> {
+    match fission_core::cancellation::check_current_cancellation() {
+        Ok(()) => Ok(()),
+        Err(fission_core::cancellation::CancellationReason::TimedOut) => Err(DecodeFailure {
+            message: "nir_timeout: Fission NIR decode timed out".to_string(),
+            diag: DecodeDiag {
+                attempts,
+                stop_reason: "timed_out".into(),
+                template_source_counts: Default::default(),
+            },
+        }),
+        Err(fission_core::cancellation::CancellationReason::Cancelled) => Err(DecodeFailure {
+            message: "nir_cancelled: Fission NIR decode cancelled".to_string(),
+            diag: DecodeDiag {
+                attempts,
+                stop_reason: "cancelled".into(),
+                template_source_counts: Default::default(),
+            },
+        }),
+    }
+}
+
+fn try_record_direct_call_targets(
+    binary_hash: &str,
+    caller_was_thumb: bool,
+    instructions: &[fission_sleigh::runtime::DecodedInstruction],
+    attempts: usize,
+) -> Result<(), DecodeFailure> {
+    check_decode_cancellation(attempts)?;
+    super::arm_thumb_heuristic::record_direct_call_targets(
+        binary_hash,
+        caller_was_thumb,
+        instructions,
+    );
+    Ok(())
+}
+
 fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usize> {
     let marker = "decode failed at 0x";
     let idx = err.find(marker)?;
@@ -76,6 +113,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
     ),
     DecodeFailure,
 > {
+    check_decode_cancellation(0)?;
     let load_spec = binary.load_spec().ok_or_else(|| DecodeFailure {
         message: format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",
@@ -254,15 +292,17 @@ pub(crate) fn decode_rust_sleigh_pcode(
         &mut memory_context,
         initial_override_lifted,
     );
+    check_decode_cancellation(1)?;
 
     match result {
         Ok(lifted) => {
             let template_source_counts = lifted.template_source_counts.clone();
-            super::arm_thumb_heuristic::record_direct_call_targets(
+            try_record_direct_call_targets(
                 &binary.hash,
                 active_context_override.is_some(),
                 &lifted.instructions,
-            );
+                1,
+            )?;
             Ok((
                 lifted.function,
                 DecodeDiag {
@@ -278,6 +318,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
             if retry_on_decode_error {
                 if last_good.is_none() {
                     for variant_lifter in lifters.iter().skip(1) {
+                        check_decode_cancellation(1)?;
                         let variant_address_state =
                             variant_lifter.normalize_low_bit_code_address(entry_address);
                         let variant_decode_entry_address = variant_address_state.address;
@@ -369,11 +410,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                     &discovered_edges,
                                 );
                             }
-                            super::arm_thumb_heuristic::record_direct_call_targets(
+                            try_record_direct_call_targets(
                                 &binary.hash,
                                 active_context_override.is_some(),
                                 &retry.instructions,
-                            );
+                                2,
+                            )?;
                             let template_source_counts = retry.template_source_counts.clone();
                             return Ok((
                                 retry.function,
@@ -390,11 +432,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 }
 
                 if let Some(mut fallback) = last_good {
-                    super::arm_thumb_heuristic::record_direct_call_targets(
+                    try_record_direct_call_targets(
                         &binary.hash,
                         active_context_override.is_some(),
                         &fallback.instructions,
-                    );
+                        2,
+                    )?;
                     if !discovered_edges.is_empty() {
                         fission_sleigh::runtime::attach_inferred_indirect_edges(
                             &mut fallback.function,
@@ -438,11 +481,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                         None,
                     );
                     if let Some(retry) = forced_result.ok().or(forced_last_good) {
-                        super::arm_thumb_heuristic::record_direct_call_targets(
-                            &binary.hash,
-                            true,
-                            &retry.instructions,
-                        );
+                        try_record_direct_call_targets(&binary.hash, true, &retry.instructions, 2)?;
                         let template_source_counts = retry.template_source_counts.clone();
                         return Ok((
                             retry.function,
@@ -456,11 +495,12 @@ pub(crate) fn decode_rust_sleigh_pcode(
                     }
                 }
             } else if let Some(mut fallback) = last_good {
-                super::arm_thumb_heuristic::record_direct_call_targets(
+                try_record_direct_call_targets(
                     &binary.hash,
                     active_context_override.is_some(),
                     &fallback.instructions,
-                );
+                    2,
+                )?;
                 if !discovered_edges.is_empty() {
                     fission_sleigh::runtime::attach_inferred_indirect_edges(
                         &mut fallback.function,
@@ -573,6 +613,9 @@ fn run_indirect_branch_fixpoint(
         // in three.
         const MAX_DECODE_ROUNDS: usize = 8;
         for _ in 0..MAX_DECODE_ROUNDS {
+            if fission_core::cancellation::is_current_cancelled() {
+                break;
+            }
             let Ok(lifted) = result.as_ref() else {
                 break;
             };
@@ -583,6 +626,9 @@ fn run_indirect_branch_fixpoint(
                 memory_context,
                 little_endian,
             );
+            if fission_core::cancellation::is_current_cancelled() {
+                break;
+            }
             if std::env::var_os("FISSION_JT_TRACE").is_some() {
                 eprintln!(
                     "[JT] entry=0x{decode_entry_address:x} round_blocks={} dispatches={} targets={}",

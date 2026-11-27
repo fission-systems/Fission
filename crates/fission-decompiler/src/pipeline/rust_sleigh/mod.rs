@@ -40,6 +40,7 @@ mod pipeline;
 mod probe;
 mod render_finish;
 
+pub(crate) use pipeline::format_cancellation_error;
 pub use pipeline::{
     LiftedFunction, decompile_with_rust_sleigh, decompile_with_rust_sleigh_with_facts,
     lift_function_pcode,
