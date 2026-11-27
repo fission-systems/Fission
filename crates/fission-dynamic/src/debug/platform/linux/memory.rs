@@ -52,6 +52,14 @@ fn parse_process_mappings(content: &str, path: &str) -> (Vec<LinuxProcessMapping
     (mappings, diagnostics)
 }
 
+/// Parse Linux `starttime` (22nd space-separated field in `/proc/<pid>/stat`, i.e. index 19 after `) `).
+pub fn parse_proc_stat_start_time(stat_content: &str) -> Option<u64> {
+    let close_paren = stat_content.rfind(')')?;
+    let tail = stat_content.get(close_paren + 1..)?;
+    // Fields after `(comm)`: index 0 is `state` (field 3), so field 22 (`starttime`) is index 19.
+    tail.split_whitespace().nth(19)?.parse::<u64>().ok()
+}
+
 /// Linux-specific memory manager
 ///
 /// Uses the procfs interface for process memory operations.
@@ -59,12 +67,40 @@ fn parse_process_mappings(content: &str, path: &str) -> (Vec<LinuxProcessMapping
 pub struct LinuxMemory {
     /// Target process ID
     target_pid: Option<u32>,
+    /// Start time from `/proc/{pid}/stat` captured on `open_process` to detect PID reuse.
+    expected_start_time: Option<u64>,
 }
 
 impl LinuxMemory {
     /// Create a new Linux memory manager
     pub fn new() -> Self {
-        Self { target_pid: None }
+        Self {
+            target_pid: None,
+            expected_start_time: None,
+        }
+    }
+
+    /// Return a stable process lifetime token derived from PID and procfs start time.
+    pub fn process_lifetime_token(&self) -> Option<String> {
+        let pid = self.target_pid?;
+        let start_time = self.expected_start_time?;
+        Some(format!("linux-proc-start:{pid}:{start_time}"))
+    }
+
+    fn read_proc_stat_start_time(pid: u32) -> Option<u64> {
+        let stat_path = format!("/proc/{pid}/stat");
+        let content = std::fs::read_to_string(stat_path).ok()?;
+        parse_proc_stat_start_time(&content)
+    }
+
+    fn verify_process_identity(&self, pid: u32, address: u64) -> Result<(), MemoryError> {
+        let Some(expected) = self.expected_start_time else {
+            return Ok(());
+        };
+        match Self::read_proc_stat_start_time(pid) {
+            Some(actual) if actual == expected => Ok(()),
+            _ => Err(MemoryError::ProcessExited { address }),
+        }
     }
 
     /// Get the target PID if set
@@ -167,11 +203,11 @@ impl Default for LinuxMemory {
 
 impl PlatformMemory for LinuxMemory {
     fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
-        // On Linux, we just store the PID and access /proc/{pid}/mem on demand
-        // Could add validation that the process exists here
+        // On Linux, we record PID and procfs `starttime` to guard against PID reuse.
         let maps_path = Self::proc_maps_path(pid);
         if std::path::Path::new(&maps_path).exists() {
             self.target_pid = Some(pid);
+            self.expected_start_time = Self::read_proc_stat_start_time(pid);
             Ok(())
         } else {
             Err(MemoryError::ReadFailed {
@@ -183,6 +219,7 @@ impl PlatformMemory for LinuxMemory {
 
     fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
         let pid = self.get_pid()?;
+        self.verify_process_identity(pid, address)?;
         if buffer.is_empty() {
             return Ok(0);
         }
@@ -222,6 +259,7 @@ impl PlatformMemory for LinuxMemory {
 
     fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
         let pid = self.get_pid()?;
+        self.verify_process_identity(pid, address)?;
         let mem_path = Self::proc_mem_path(pid);
 
         let mut file = OpenOptions::new()
@@ -248,6 +286,7 @@ impl PlatformMemory for LinuxMemory {
 
     fn query_regions(&self) -> Result<Vec<MemoryRegion>, MemoryError> {
         let pid = self.get_pid()?;
+        self.verify_process_identity(pid, 0)?;
         let maps_path = Self::proc_maps_path(pid);
 
         let (mappings, _) = read_process_mappings(pid).map_err(|e| MemoryError::ReadFailed {
@@ -331,5 +370,13 @@ mod tests {
     #[test]
     fn proc_maps_path_decoder_leaves_non_escape_backslashes_alone() {
         assert_eq!(decode_proc_maps_path("/tmp/a\\name"), "/tmp/a\\name");
+    }
+
+    #[test]
+    fn proc_stat_start_time_parser_handles_spaces_and_nested_parens() {
+        // Fields 1..=22 where comm contains spaces and parentheses.
+        let stat = "1234 (worker (v2) main) S 1 1234 1234 0 -1 4194304 100 0 0 0 1 2 0 0 20 0 4 0 987654321 1000 10";
+        assert_eq!(super::parse_proc_stat_start_time(stat), Some(987_654_321));
+        assert_eq!(super::parse_proc_stat_start_time("1234 (short) S 1"), None);
     }
 }

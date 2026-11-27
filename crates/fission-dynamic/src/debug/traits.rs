@@ -675,6 +675,294 @@ pub trait ExecutionBackend: Send {
             ],
         })
     }
+
+    /// Capture stable process identity (including any backend lifetime token) for live acquisition.
+    fn capture_identity(&self, session_id: &str) -> Option<super::types::ProcessCaptureIdentity> {
+        let pid = self.attached_pid()?;
+        Some(super::types::ProcessCaptureIdentity {
+            host_id: None,
+            session_id: session_id.to_string(),
+            pid,
+            lifetime_token: None,
+            architecture: None,
+        })
+    }
+
+    /// Describe current execution consistency and thread-enumeration completeness.
+    fn capture_consistency_state(
+        &self,
+    ) -> (
+        super::types::CaptureConsistency,
+        super::types::EnumerationCompleteness,
+    ) {
+        use super::types::{CaptureConsistency, DebugStatus, EnumerationCompleteness};
+
+        let state = self.get_state();
+        let thread_enum = if state.threads.is_empty() {
+            EnumerationCompleteness::Unavailable
+        } else {
+            // Default DebugState tracks observed threads rather than guaranteeing host-wide completeness.
+            EnumerationCompleteness::Partial
+        };
+
+        let consistency = match state.status {
+            DebugStatus::Running => CaptureConsistency::LiveBestEffort,
+            DebugStatus::Suspended
+                if !state.threads.is_empty() && state.threads.values().all(|t| t.suspended) =>
+            {
+                CaptureConsistency::StoppedAllObservedThreads
+            }
+            _ => CaptureConsistency::Unknown,
+        };
+
+        (consistency, thread_enum)
+    }
+
+    /// Report active debugger interventions overlapping `[start, end)` without hiding patched bytes.
+    fn recorded_interventions(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Vec<super::types::DebuggerIntervention> {
+        use super::types::{BreakpointKind, DebuggerIntervention, DebuggerInterventionKind};
+
+        self.list_breakpoints()
+            .into_iter()
+            .filter(|bp| {
+                bp.kind == BreakpointKind::Software && bp.address >= start && bp.address < end
+            })
+            .map(|bp| DebuggerIntervention {
+                kind: DebuggerInterventionKind::SoftwareBreakpointPatched {
+                    address: bp.address,
+                    original_byte: bp.original_byte,
+                    enabled: bp.enabled,
+                },
+                detail: format!(
+                    "software breakpoint patched at 0x{:x} (enabled={})",
+                    bp.address, bp.enabled
+                ),
+            })
+            .collect()
+    }
+
+    /// Perform an epoch-bound bounded sparse acquisition, verifying capability authorization,
+    /// pre/post process identity stability, thread/mapping churn, and debugger interventions.
+    ///
+    /// Never implies that stopped threads make shared mappings immutable, never authorizes live
+    /// unstopped reads unless `options.allow_live_unstopped` is true (without auto-suspending),
+    /// and never silently overwrites observed breakpoint bytes with `original_byte`.
+    fn acquire_epoch_bound_memory(
+        &mut self,
+        address: u64,
+        size: usize,
+        options: super::types::LiveAcquisitionOptions,
+    ) -> FissionResult<super::types::EpochBoundMemoryCapture> {
+        use super::capabilities::{DebugOperation, OperationSupport};
+        use super::types::{
+            AcquisitionEpoch, CaptureCoherenceStatus, CaptureConsistency, EnumerationCompleteness,
+            EpochBoundMemoryCapture, LIVE_ACQUISITION_SCHEMA_VERSION, MemoryViewKind,
+            ModuleListCompleteness, ModuleListReport,
+        };
+
+        fn fnv1a_update(hash: &mut u64, bytes: &[u8]) {
+            for &b in bytes {
+                *hash ^= u64::from(b);
+                *hash = hash.wrapping_mul(0x1000_0000_01b3);
+            }
+        }
+
+        fn fingerprint_modules(report: &ModuleListReport) -> u64 {
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            fnv1a_update(&mut h, &report.pid.to_le_bytes());
+            for m in &report.modules {
+                fnv1a_update(&mut h, m.path.as_bytes());
+                for seg in &m.mappings {
+                    fnv1a_update(&mut h, &seg.runtime_start.to_le_bytes());
+                    fnv1a_update(&mut h, &seg.runtime_end.to_le_bytes());
+                }
+            }
+            for seg in &report.other_mappings {
+                fnv1a_update(&mut h, &seg.runtime_start.to_le_bytes());
+                fnv1a_update(&mut h, &seg.runtime_end.to_le_bytes());
+            }
+            h
+        }
+
+        fn unix_now_ms() -> u64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+                .unwrap_or(0)
+        }
+
+        if options.require_memory_read_capability {
+            let readable = self
+                .capabilities()
+                .operation(DebugOperation::MemoryRead)
+                .is_some_and(|cap| !matches!(&cap.support, OperationSupport::Unsupported { .. }));
+            if !readable {
+                return Err(fission_core::err!(
+                    debug,
+                    "live memory acquisition refused: backend does not report MemoryRead capability"
+                ));
+            }
+        }
+
+        let identity_before = self
+            .capture_identity(&options.session_id)
+            .ok_or_else(|| fission_core::err!(debug, "not attached to a target process"))?;
+
+        let (consistency_before, thread_enum) = self.capture_consistency_state();
+        if consistency_before == CaptureConsistency::LiveBestEffort && !options.allow_live_unstopped
+        {
+            return Err(fission_core::err!(
+                debug,
+                "live memory acquisition on an unstopped target requires allow_live_unstopped authorization"
+            ));
+        }
+
+        let size_u64 = u64::try_from(size)
+            .map_err(|_| fission_core::err!(debug, "acquisition size out of range"))?;
+        let end = address.checked_add(size_u64).ok_or_else(|| {
+            fission_core::err!(
+                debug,
+                "acquisition range overflows address space at 0x{address:x}"
+            )
+        })?;
+
+        let started_unix_ms = unix_now_ms();
+        let observed_thread_ids_before: Vec<u32> =
+            self.get_state().threads.keys().copied().collect();
+
+        let modules_before = self.list_modules().ok();
+        let map_enum_before = modules_before.as_ref().map(|r| match r.completeness {
+            ModuleListCompleteness::Complete => EnumerationCompleteness::Complete,
+            ModuleListCompleteness::Partial => EnumerationCompleteness::Partial,
+        });
+
+        let sparse_capture = self.read_memory_sparse(address, size, options.sparse)?;
+        let ended_unix_ms = unix_now_ms();
+
+        let identity_after = self.capture_identity(&options.session_id);
+        let observed_thread_ids_after: Vec<u32> =
+            self.get_state().threads.keys().copied().collect();
+        let modules_after = self.list_modules().ok();
+
+        let identity_stable = identity_after.as_ref() == Some(&identity_before);
+        let threads_changed = observed_thread_ids_before != observed_thread_ids_after;
+
+        let (mapping_enumeration, mappings_changed) = match (&modules_before, &modules_after) {
+            (Some(before), Some(after)) => {
+                let enum_state = map_enum_before.unwrap_or(EnumerationCompleteness::Partial);
+                let changed = fingerprint_modules(before) != fingerprint_modules(after)
+                    || before.modules.len() != after.modules.len();
+                (enum_state, changed)
+            }
+            (None, None) => (EnumerationCompleteness::Unavailable, false),
+            _ => (EnumerationCompleteness::Partial, true),
+        };
+
+        let mut diagnostics = Vec::new();
+        if !identity_stable {
+            diagnostics.push(
+                "target process identity changed, reused PID, or exited during acquisition; refusing to merge observations"
+                    .to_string(),
+            );
+        }
+        if identity_before.lifetime_token.is_none() {
+            diagnostics.push(
+                "backend does not provide a process lifetime token beyond numeric PID; PID reuse risk remains"
+                    .to_string(),
+            );
+        }
+        if threads_changed {
+            diagnostics.push(format!(
+                "observed thread set changed during acquisition ({} -> {} threads)",
+                observed_thread_ids_before.len(),
+                observed_thread_ids_after.len()
+            ));
+        }
+        if mappings_changed {
+            diagnostics.push(
+                "module/memory mapping snapshot changed between pre- and post-acquisition checks"
+                    .to_string(),
+            );
+        }
+        if mapping_enumeration != EnumerationCompleteness::Complete {
+            diagnostics.push(format!(
+                "mapping enumeration completeness is {:?}",
+                mapping_enumeration
+            ));
+        }
+        if thread_enum != EnumerationCompleteness::Complete {
+            diagnostics.push(format!(
+                "thread enumeration completeness is {:?}",
+                thread_enum
+            ));
+        }
+        if sparse_capture.coverage().missing_bytes > 0 {
+            diagnostics.push(format!(
+                "capture recorded {} unread gap byte(s) across {} gap(s)",
+                sparse_capture.coverage().missing_bytes,
+                sparse_capture.coverage().gap_count
+            ));
+        }
+
+        let interventions = self.recorded_interventions(address, end);
+        if !interventions.is_empty() {
+            diagnostics.push(format!(
+                "{} debugger intervention(s) overlap raw observed range; raw bytes preserved without silent unpatching",
+                interventions.len()
+            ));
+        }
+
+        let (coherence, payload) =
+            if !identity_stable || (mappings_changed && options.refuse_on_mapping_churn) {
+                (CaptureCoherenceStatus::InconsistentRefused, None)
+            } else if sparse_capture.coverage().missing_bytes > 0
+                || mappings_changed
+                || threads_changed
+                || thread_enum != EnumerationCompleteness::Complete
+                || mapping_enumeration != EnumerationCompleteness::Complete
+                || identity_before.lifetime_token.is_none()
+                || matches!(
+                    consistency_before,
+                    CaptureConsistency::LiveBestEffort | CaptureConsistency::Unknown
+                )
+            {
+                (CaptureCoherenceStatus::Partial, Some(sparse_capture))
+            } else {
+                (CaptureCoherenceStatus::Coherent, Some(sparse_capture))
+            };
+
+        let shared_mappings_mutable = consistency_before != CaptureConsistency::OsSnapshot;
+
+        Ok(EpochBoundMemoryCapture {
+            schema_version: LIVE_ACQUISITION_SCHEMA_VERSION,
+            identity: identity_before,
+            epoch: AcquisitionEpoch {
+                epoch_id: options.epoch_id,
+                started_unix_ms,
+                ended_unix_ms,
+                consistency: consistency_before,
+                shared_mappings_mutable,
+                thread_enumeration: thread_enum,
+                mapping_enumeration,
+                observed_thread_ids_before,
+                observed_thread_ids_after,
+                threads_changed,
+                mappings_changed,
+                identity_stable,
+            },
+            requested_start: address,
+            requested_size: size,
+            view_kind: MemoryViewKind::RawObserved,
+            interventions,
+            coherence,
+            diagnostics,
+            capture: payload,
+        })
+    }
 }
 
 // ============================================================================
