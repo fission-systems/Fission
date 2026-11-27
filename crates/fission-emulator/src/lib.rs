@@ -25,7 +25,10 @@ pub use metrics::{
     BudgetReport, EmulatorMetrics, ExploredStateReport, MachineStateReport, MemoryReadReport,
     SandboxMetricsReport, SolvedInputReport, SymbolicExploreReport,
 };
-pub use observe::{BehaviorEvent, BehaviorLog, Coverage, ObserveMask, Observer, ShadowMode};
+pub use observe::{
+    BehaviorArgPolicy, BehaviorEvent, BehaviorLog, CallOutcome, CallStatus, Coverage, EffectScope,
+    HleAttempt, ObserveMask, Observer, ShadowMode, SyscallAttempt,
+};
 pub use os::{BareMetalEnv, HleResult, LinuxEnv, OsEnvironment, WindowsEnv};
 pub use pcode::eval::Evaluator;
 pub use pcode::state::MachineState;

@@ -24,7 +24,8 @@
 //! syscall arguments, for instance, are pulled from the ABI's registers by the
 //! syscall hook rather than by the observer.
 
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 
 /// Which callbacks any observer has asked for.
 ///
@@ -187,8 +188,33 @@ pub trait Observer: Send {
         self.on_syscall(pc, number, args);
     }
 
+    /// A structured syscall attempt, emitted before dispatch including for
+    /// unmapped raw syscall numbers.
+    fn on_syscall_attempt(&mut self, attempt: &SyscallAttempt) {
+        self.on_syscall_detailed(
+            attempt.pc,
+            attempt.canonical_number.unwrap_or(attempt.raw_number),
+            attempt.name,
+            &attempt.args,
+            attempt.detail.clone(),
+        );
+    }
+
+    /// Completion outcome correlated to a prior [`Self::on_syscall_attempt`] by
+    /// `event_id` and `task_id`.
+    fn on_syscall_complete(&mut self, _event_id: u64, _task_id: u64, _outcome: &CallOutcome) {}
+
     /// A high-level-emulation stub stood in for a real call.
     fn on_hle(&mut self, _pc: u64, _name: &str) {}
+
+    /// A structured HLE dispatch attempt captured before running the stub.
+    fn on_hle_attempt(&mut self, attempt: &HleAttempt) {
+        self.on_hle(attempt.pc, &attempt.name);
+    }
+
+    /// Completion outcome correlated to a prior [`Self::on_hle_attempt`] by
+    /// `event_id` and `task_id`.
+    fn on_hle_complete(&mut self, _event_id: u64, _task_id: u64, _outcome: &CallOutcome) {}
 
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -257,12 +283,193 @@ impl Observer for Coverage {
     }
 }
 
+/// Policy controlling how sensitive string/buffer arguments are retained in
+/// behavior logs and reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BehaviorArgPolicy {
+    /// Keep bounded string/buffer previews while preserving truncation markers.
+    #[default]
+    Bounded,
+    /// Minimize sensitive string/buffer payloads to byte counts and pointers only.
+    Redacted,
+}
+
+/// Whether an observed event produced any modeled guest effect.
+///
+/// The sandbox never executes host-forwarded effects for observed syscalls or
+/// HLE stubs, so there is intentionally no host-effect variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectScope {
+    /// Failed, unsupported, missed, deadlocked, or uncompleted attempt.
+    #[default]
+    None,
+    /// Effect occurred only within modeled emulator/guest state (VFS/memory/task).
+    ModeledGuest,
+}
+
+/// Correlated completion status for a syscall or HLE dispatch attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallStatus {
+    Attempted,
+    Succeeded,
+    Error,
+    Unsupported,
+    Blocked,
+    Resumed,
+    Halted,
+    Deadlocked,
+    HleMiss,
+}
+
+/// Structured outcome correlated to an attempted syscall or HLE dispatch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallOutcome {
+    pub status: CallStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_value: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub errno: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<u32>,
+    pub effect_scope: EffectScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl CallOutcome {
+    pub fn succeeded_guest(return_value: Option<u64>) -> Self {
+        Self {
+            status: CallStatus::Succeeded,
+            return_value,
+            errno: None,
+            exit_code: None,
+            effect_scope: EffectScope::ModeledGuest,
+            detail: None,
+        }
+    }
+
+    pub fn error(return_value: Option<u64>, errno: Option<i64>, detail: Option<String>) -> Self {
+        Self {
+            status: CallStatus::Error,
+            return_value,
+            errno,
+            exit_code: None,
+            effect_scope: EffectScope::None,
+            detail,
+        }
+    }
+
+    pub fn unsupported(return_value: Option<u64>, errno: Option<i64>, detail: String) -> Self {
+        Self {
+            status: CallStatus::Unsupported,
+            return_value,
+            errno,
+            exit_code: None,
+            effect_scope: EffectScope::None,
+            detail: Some(detail),
+        }
+    }
+
+    pub fn blocked(detail: Option<String>) -> Self {
+        Self {
+            status: CallStatus::Blocked,
+            return_value: None,
+            errno: None,
+            exit_code: None,
+            effect_scope: EffectScope::ModeledGuest,
+            detail,
+        }
+    }
+
+    pub fn resumed_guest(return_value: Option<u64>) -> Self {
+        Self {
+            status: CallStatus::Resumed,
+            return_value,
+            errno: None,
+            exit_code: None,
+            effect_scope: EffectScope::ModeledGuest,
+            detail: None,
+        }
+    }
+
+    pub fn halted(exit_code: u32) -> Self {
+        Self {
+            status: CallStatus::Halted,
+            return_value: None,
+            errno: None,
+            exit_code: Some(exit_code),
+            effect_scope: EffectScope::ModeledGuest,
+            detail: None,
+        }
+    }
+
+    pub fn deadlocked(detail: Option<String>) -> Self {
+        Self {
+            status: CallStatus::Deadlocked,
+            return_value: None,
+            errno: None,
+            exit_code: None,
+            effect_scope: EffectScope::None,
+            detail,
+        }
+    }
+
+    pub fn hle_miss(return_value: Option<u64>, detail: String) -> Self {
+        Self {
+            status: CallStatus::HleMiss,
+            return_value,
+            errno: None,
+            exit_code: None,
+            effect_scope: EffectScope::None,
+            detail: Some(detail),
+        }
+    }
+
+    /// True only when the call completed within modeled guest state without
+    /// error, unsupported status, HLE miss, or deadlock.
+    pub fn is_successful_effect(&self) -> bool {
+        self.effect_scope == EffectScope::ModeledGuest
+            && matches!(
+                self.status,
+                CallStatus::Succeeded | CallStatus::Resumed | CallStatus::Halted
+            )
+    }
+}
+
+/// Entry-time metadata for one attempted guest syscall.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyscallAttempt {
+    pub event_id: u64,
+    pub task_id: u64,
+    pub pc: u64,
+    pub guest_abi: &'static str,
+    pub raw_number: u64,
+    pub canonical_number: Option<u64>,
+    pub name: Option<&'static str>,
+    pub args: [u64; 6],
+    pub detail: Vec<SyscallArg>,
+}
+
+/// Entry-time metadata for one attempted HLE procedure dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HleAttempt {
+    pub event_id: u64,
+    pub task_id: u64,
+    pub pc: u64,
+    pub name: String,
+    pub args: [u64; 6],
+}
+
 /// One syscall argument, read the way its ABI says to read it.
 ///
 /// Captured **when the call happens**, not when a report is written: a path
 /// name lives in a buffer the guest is free to reuse the moment the call
 /// returns, so resolving it later reads whatever happens to be there.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum SyscallArg {
     Int(i64),
     Hex(u64),
@@ -273,15 +480,50 @@ pub enum SyscallArg {
         text: String,
         truncated: bool,
     },
+    RedactedStr {
+        ptr: u64,
+        byte_len: usize,
+        truncated: bool,
+    },
     Buf {
         ptr: u64,
         len: u64,
         preview: Vec<u8>,
     },
+    RedactedBuf {
+        ptr: u64,
+        len: u64,
+    },
     Flags {
         raw: u64,
         decoded: String,
     },
+}
+
+impl SyscallArg {
+    /// Apply `policy` to minimize sensitive string/buffer payloads while
+    /// retaining structural metadata (pointers, lengths, truncation, flags).
+    pub fn apply_policy(self, policy: BehaviorArgPolicy) -> Self {
+        match (policy, self) {
+            (BehaviorArgPolicy::Bounded, other) => other,
+            (
+                BehaviorArgPolicy::Redacted,
+                Self::Str {
+                    ptr,
+                    text,
+                    truncated,
+                },
+            ) => Self::RedactedStr {
+                ptr,
+                byte_len: text.len(),
+                truncated,
+            },
+            (BehaviorArgPolicy::Redacted, Self::Buf { ptr, len, .. }) => {
+                Self::RedactedBuf { ptr, len }
+            }
+            (BehaviorArgPolicy::Redacted, other) => other,
+        }
+    }
 }
 
 impl std::fmt::Display for SyscallArg {
@@ -302,6 +544,17 @@ impl std::fmt::Display for SyscallArg {
                     if *truncated { "..." } else { "" }
                 )
             }
+            Self::RedactedStr {
+                byte_len,
+                truncated,
+                ..
+            } => {
+                write!(
+                    f,
+                    "<redacted:{byte_len}B{}>",
+                    if *truncated { "+" } else { "" }
+                )
+            }
             Self::Buf { len, preview, .. } => {
                 let shown: String = preview
                     .iter()
@@ -320,19 +573,26 @@ impl std::fmt::Display for SyscallArg {
                 };
                 write!(f, "\"{shown}\"{more} ({len})")
             }
+            Self::RedactedBuf { len, .. } => write!(f, "<redacted:{len}B>"),
             Self::Flags { decoded, .. } => write!(f, "{decoded}"),
         }
     }
 }
 
-/// What the run did to the outside world, in order.
+/// What the run attempted in modeled guest state, in order.
 ///
 /// Needs no compiled-code instrumentation at all: syscalls and HLE stubs are
 /// dispatched by the OS layer, outside the JIT.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BehaviorEvent {
     Syscall {
+        event_id: u64,
+        task_id: u64,
         pc: u64,
+        guest_abi: Option<&'static str>,
+        raw_number: u64,
+        canonical_number: Option<u64>,
+        /// Compatibility number: canonical ID when mapped, otherwise `raw_number`.
         number: u64,
         /// The ABI name, when the table knows this number. `None` is not a
         /// failure -- a report shows `syscall_<n>` rather than guessing.
@@ -341,27 +601,38 @@ pub enum BehaviorEvent {
         /// is an interpretation of these, and an interpretation can be wrong.
         args: [u64; 6],
         detail: Vec<SyscallArg>,
+        outcome: Option<CallOutcome>,
     },
     Hle {
+        event_id: u64,
+        task_id: u64,
         pc: u64,
         name: String,
+        args: [u64; 6],
+        outcome: Option<CallOutcome>,
     },
 }
 
 impl BehaviorEvent {
-    /// One line, the way an analyst reads it.
+    /// One line, the way an analyst reads it (compatibility projection).
     pub fn render(&self) -> String {
         match self {
             Self::Syscall {
+                raw_number,
                 number,
                 name,
                 args,
                 detail,
                 ..
             } => {
+                let fallback_num = if name.is_none() && *raw_number != 0 {
+                    *raw_number
+                } else {
+                    *number
+                };
                 let name = name
                     .map(|n| n.to_string())
-                    .unwrap_or_else(|| format!("syscall_{number}"));
+                    .unwrap_or_else(|| format!("syscall_{fallback_num}"));
                 if detail.is_empty() {
                     // No spec: show the registers rather than an empty call,
                     // since an unknown syscall is exactly what wants looking at.
@@ -375,16 +646,50 @@ impl BehaviorEvent {
             Self::Hle { name, .. } => format!("{name}()"),
         }
     }
+
+    pub fn event_id(&self) -> u64 {
+        match self {
+            Self::Syscall { event_id, .. } | Self::Hle { event_id, .. } => *event_id,
+        }
+    }
+
+    pub fn task_id(&self) -> u64 {
+        match self {
+            Self::Syscall { task_id, .. } | Self::Hle { task_id, .. } => *task_id,
+        }
+    }
+
+    pub fn outcome(&self) -> Option<&CallOutcome> {
+        match self {
+            Self::Syscall { outcome, .. } | Self::Hle { outcome, .. } => outcome.as_ref(),
+        }
+    }
+
+    fn set_outcome(&mut self, next: CallOutcome) {
+        match self {
+            Self::Syscall { outcome, .. } | Self::Hle { outcome, .. } => *outcome = Some(next),
+        }
+    }
 }
 
 /// Ordered log of [`BehaviorEvent`]s, bounded so a long run cannot exhaust
 /// memory on its own.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BehaviorLog {
     pub events: Vec<BehaviorEvent>,
-    /// Events dropped after `limit` was reached.
+    /// Attempt events dropped after `limit` was reached.
     pub dropped: u64,
+    /// Completion events that could not be attached (attempt dropped or absent).
+    pub dropped_completions: u64,
     limit: usize,
+    arg_policy: BehaviorArgPolicy,
+    event_index: HashMap<u64, usize>,
+}
+
+impl Default for BehaviorLog {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BehaviorLog {
@@ -395,11 +700,22 @@ impl BehaviorLog {
     }
 
     pub fn with_limit(limit: usize) -> Self {
+        Self::with_policy(limit, BehaviorArgPolicy::Bounded)
+    }
+
+    pub fn with_policy(limit: usize, arg_policy: BehaviorArgPolicy) -> Self {
         Self {
             events: Vec::new(),
             dropped: 0,
+            dropped_completions: 0,
             limit,
+            arg_policy,
+            event_index: HashMap::new(),
         }
+    }
+
+    pub fn arg_policy(&self) -> BehaviorArgPolicy {
+        self.arg_policy
     }
 
     fn push(&mut self, event: BehaviorEvent) {
@@ -407,7 +723,30 @@ impl BehaviorLog {
             self.dropped += 1;
             return;
         }
+        let id = event.event_id();
+        let idx = self.events.len();
         self.events.push(event);
+        if id != 0 {
+            self.event_index.insert(id, idx);
+        }
+    }
+
+    fn record_completion(&mut self, event_id: u64, task_id: u64, outcome: &CallOutcome) {
+        if event_id == 0 {
+            self.dropped_completions += 1;
+            return;
+        }
+        let Some(&idx) = self.event_index.get(&event_id) else {
+            self.dropped_completions += 1;
+            return;
+        };
+        if let Some(event) = self.events.get_mut(idx) {
+            if event.task_id() == task_id || task_id == 0 {
+                event.set_outcome(outcome.clone());
+                return;
+            }
+        }
+        self.dropped_completions += 1;
     }
 }
 
@@ -418,11 +757,17 @@ impl Observer for BehaviorLog {
 
     fn on_syscall(&mut self, pc: u64, number: u64, args: &[u64; 6]) {
         self.push(BehaviorEvent::Syscall {
+            event_id: 0,
+            task_id: 0,
             pc,
+            guest_abi: None,
+            raw_number: number,
+            canonical_number: Some(number),
             number,
             name: None,
             args: *args,
             detail: Vec::new(),
+            outcome: None,
         });
     }
 
@@ -434,20 +779,75 @@ impl Observer for BehaviorLog {
         args: &[u64; 6],
         detail: Vec<SyscallArg>,
     ) {
+        let detail = detail
+            .into_iter()
+            .map(|arg| arg.apply_policy(self.arg_policy))
+            .collect();
         self.push(BehaviorEvent::Syscall {
+            event_id: 0,
+            task_id: 0,
             pc,
+            guest_abi: None,
+            raw_number: number,
+            canonical_number: Some(number),
             number,
             name,
             args: *args,
             detail,
+            outcome: None,
         });
+    }
+
+    fn on_syscall_attempt(&mut self, attempt: &SyscallAttempt) {
+        let detail = attempt
+            .detail
+            .iter()
+            .cloned()
+            .map(|arg| arg.apply_policy(self.arg_policy))
+            .collect();
+        self.push(BehaviorEvent::Syscall {
+            event_id: attempt.event_id,
+            task_id: attempt.task_id,
+            pc: attempt.pc,
+            guest_abi: Some(attempt.guest_abi),
+            raw_number: attempt.raw_number,
+            canonical_number: attempt.canonical_number,
+            number: attempt.canonical_number.unwrap_or(attempt.raw_number),
+            name: attempt.name,
+            args: attempt.args,
+            detail,
+            outcome: None,
+        });
+    }
+
+    fn on_syscall_complete(&mut self, event_id: u64, task_id: u64, outcome: &CallOutcome) {
+        self.record_completion(event_id, task_id, outcome);
     }
 
     fn on_hle(&mut self, pc: u64, name: &str) {
         self.push(BehaviorEvent::Hle {
+            event_id: 0,
+            task_id: 0,
             pc,
             name: name.to_string(),
+            args: [0; 6],
+            outcome: None,
         });
+    }
+
+    fn on_hle_attempt(&mut self, attempt: &HleAttempt) {
+        self.push(BehaviorEvent::Hle {
+            event_id: attempt.event_id,
+            task_id: attempt.task_id,
+            pc: attempt.pc,
+            name: attempt.name.clone(),
+            args: attempt.args,
+            outcome: None,
+        });
+    }
+
+    fn on_hle_complete(&mut self, event_id: u64, task_id: u64, outcome: &CallOutcome) {
+        self.record_completion(event_id, task_id, outcome);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

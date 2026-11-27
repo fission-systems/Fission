@@ -1404,13 +1404,12 @@ pub unsafe extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> 
 
         tracing::debug!("JIT HLE trap: {} at 0x{:X}", func_name, magic_pc);
 
-        let result = {
-            let os_ref = std::sync::Arc::clone(&emu.os);
-            os_ref.dispatch_hle(emu, &func_name).unwrap_or_else(|e| {
+        let result = emu
+            .dispatch_hle_observed(magic_pc, &func_name)
+            .unwrap_or_else(|e| {
                 tracing::warn!("JIT HLE dispatch error: {:?}", e);
                 HleResult::Continue
-            })
-        };
+            });
 
         match result {
             HleResult::Schedule => {

@@ -165,6 +165,22 @@ impl Default for LinuxEnv {
     }
 }
 
+/// Decode a Linux syscall return register as a positive `errno` when it lies
+/// in `[-4095, -1]`. Handles 32-bit sign extension so `i386` and `ARM32` `-errno`
+/// values are never mistaken for large positive return values.
+pub(crate) fn decode_linux_syscall_errno(ret: u64, pointer_size: u8) -> Option<i64> {
+    let signed = if pointer_size == 4 {
+        i64::from(ret as u32 as i32)
+    } else {
+        ret as i64
+    };
+    if (-4095..=-1).contains(&signed) {
+        Some(-signed)
+    } else {
+        None
+    }
+}
+
 /// What a real kernel answers a syscall it does not have.
 ///
 /// Answering zero instead is answering *success*, and a program that asked for
@@ -341,56 +357,161 @@ impl OsEnvironment for LinuxEnv {
             // `syscall_conv` for why inventing one would be worse.
             let raw_num = emu.raw_syscall_number();
             emu.metrics.note_guest_syscall(raw_num);
-            let sys_num = match emu.syscall_number() {
+            let canonical = emu.syscall_number();
+            let abi = syscall_conv::SyscallAbi::for_arch(&emu.arch);
+            let guest_abi = abi.abi_name();
+            let task_id = emu.current_tid;
+            let args = emu.syscall_args();
+            let pc = if emu.current_instruction_pc() != 0 {
+                emu.current_instruction_pc()
+            } else {
+                emu.pc
+            };
+            let spec = canonical.and_then(syscall_abi::spec);
+            let event_id = if !emu.observers.is_empty() {
+                let id = emu.next_behavior_event_id();
+                let detail = spec
+                    .map(|spec| decode_syscall_args(emu, spec, &args))
+                    .unwrap_or_default();
+                let attempt = crate::observe::SyscallAttempt {
+                    event_id: id,
+                    task_id,
+                    pc,
+                    guest_abi,
+                    raw_number: raw_num,
+                    canonical_number: canonical,
+                    name: spec.map(|s| s.name),
+                    args,
+                    detail,
+                };
+                emu.notify_syscall_attempt(&attempt);
+                id
+            } else {
+                0
+            };
+
+            let sys_num = match canonical {
                 Some(n) => n,
                 None => {
                     tracing::warn!("Unimplemented Linux syscall: {} (raw)", raw_num);
                     emu.metrics.note_unknown_syscall(raw_num);
                     emu.set_syscall_return(ENOSYS)?;
+                    if event_id != 0 {
+                        let outcome = crate::observe::CallOutcome::unsupported(
+                            Some(ENOSYS),
+                            Some(38),
+                            format!("unmapped {guest_abi} syscall {raw_num}"),
+                        );
+                        emu.notify_syscall_complete(event_id, task_id, &outcome);
+                    }
                     return Ok(HleResult::Continue);
                 }
             };
             emu.metrics.note_syscall(sys_num);
-            if !emu.observers.is_empty() {
-                // The syscall registers, which are not the architecture's
-                // *call* registers: x86-64 passes the fourth argument in R10
-                // here and RCX there, because `syscall` clobbers RCX. Read
-                // here rather than in the observer, which never gets the
-                // emulator.
-                let args = emu.syscall_args();
-                let pc = emu.pc;
-                let spec = syscall_abi::spec(sys_num);
-                let detail = spec
-                    .map(|spec| decode_syscall_args(emu, spec, &args))
-                    .unwrap_or_default();
-                emu.notify_syscall_detailed(pc, sys_num, spec.map(|s| s.name), &args, detail);
-            }
             // Sink: a syscall argument carrying data derived from an
             // untrusted source. Checked before the call, because the call is
             // what the tainted value is about to be used for.
             if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
                 check_syscall_taint(emu, sys_num);
             }
-            if let Some(result) = self.dispatch_guest_task_syscall(emu, sys_num) {
-                let result = result?;
-                if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+            let (result, implemented) = if let Some(res) =
+                self.dispatch_guest_task_syscall(emu, sys_num)
+            {
+                if res.is_ok() && matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
                     taint_syscall_output(emu, sys_num);
                 }
-                return Ok(result);
-            }
-            if let Some(proc) = self.simos.syscalls.get(&sys_num) {
-                let result = proc.run(emu);
+                (res, true)
+            } else if let Some(proc) = self.simos.syscalls.get(&sys_num) {
+                let res = proc.run(emu);
                 // Source: a syscall that fills a guest buffer from outside.
-                if matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+                if res.is_ok() && matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
                     taint_syscall_output(emu, sys_num);
                 }
-                return result;
+                (res, true)
             } else {
                 tracing::warn!("Unimplemented Linux syscall: {}", sys_num);
                 emu.metrics.note_unknown_syscall(sys_num);
                 emu.set_syscall_return(ENOSYS)?;
-                return Ok(HleResult::Continue);
+                (Ok(HleResult::Continue), false)
+            };
+
+            if event_id != 0 {
+                match &result {
+                    Err(err) => {
+                        let outcome = crate::observe::CallOutcome::error(
+                            None,
+                            None,
+                            Some(format!("syscall handler error: {err}")),
+                        );
+                        emu.notify_syscall_complete(event_id, task_id, &outcome);
+                    }
+                    Ok(_) if !implemented => {
+                        let outcome = crate::observe::CallOutcome::unsupported(
+                            Some(ENOSYS),
+                            Some(38),
+                            format!("unimplemented Linux canonical syscall {sys_num}"),
+                        );
+                        emu.notify_syscall_complete(event_id, task_id, &outcome);
+                    }
+                    Ok(HleResult::Halt(code)) => {
+                        let outcome = crate::observe::CallOutcome::halted(*code);
+                        emu.notify_syscall_complete(event_id, task_id, &outcome);
+                    }
+                    Ok(HleResult::Deadlock) => {
+                        let outcome = crate::observe::CallOutcome::deadlocked(Some(
+                            "guest deadlock during syscall".into(),
+                        ));
+                        emu.notify_syscall_complete(event_id, task_id, &outcome);
+                    }
+                    Ok(HleResult::Schedule) => {
+                        if sys_num == 24 {
+                            // sched_yield completes immediately from the caller's viewpoint.
+                            let outcome = crate::observe::CallOutcome::succeeded_guest(Some(0));
+                            emu.notify_syscall_complete(event_id, task_id, &outcome);
+                        } else if sys_num == 60 {
+                            let code = (args[0] as u32) & 0xff;
+                            let outcome = crate::observe::CallOutcome::halted(code);
+                            emu.notify_syscall_complete(event_id, task_id, &outcome);
+                        } else if emu.current_tid == task_id {
+                            let ret = emu.read_register_u64(abi.result).ok();
+                            let outcome = match ret
+                                .and_then(|r| decode_linux_syscall_errno(r, emu.arch.pointer_size))
+                            {
+                                Some(errno) => {
+                                    crate::observe::CallOutcome::error(ret, Some(errno), None)
+                                }
+                                None => crate::observe::CallOutcome::resumed_guest(ret),
+                            };
+                            emu.notify_syscall_complete(event_id, task_id, &outcome);
+                        } else {
+                            let outcome = crate::observe::CallOutcome::blocked(Some(
+                                "guest task blocked waiting in scheduler".into(),
+                            ));
+                            emu.notify_syscall_complete(event_id, task_id, &outcome);
+                            emu.track_blocked_syscall(task_id, event_id);
+                        }
+                    }
+                    Ok(HleResult::Continue | HleResult::JumpTo(_)) => {
+                        let ret = emu.read_register_u64(abi.result).ok();
+                        let outcome = match ret
+                            .and_then(|r| decode_linux_syscall_errno(r, emu.arch.pointer_size))
+                        {
+                            Some(38) => crate::observe::CallOutcome::unsupported(
+                                ret,
+                                Some(38),
+                                "syscall returned ENOSYS".into(),
+                            ),
+                            Some(errno) => {
+                                crate::observe::CallOutcome::error(ret, Some(errno), None)
+                            }
+                            None => crate::observe::CallOutcome::succeeded_guest(ret),
+                        };
+                        emu.notify_syscall_complete(event_id, task_id, &outcome);
+                    }
+                }
             }
+
+            return result;
         }
 
         // After main returns into our synthetic stub: exit code is in the ABI return register.
