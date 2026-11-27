@@ -24,8 +24,12 @@ impl IdentityEvidenceThresholds {
     };
 }
 
+pub const PACKED_SCORE_POLICY_VERSION: &str = "packed-layout-heuristic/v2";
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PackedScorePolicy {
+    pub policy_version: &'static str,
+    pub min_entropy_coverage_for_absence: f32,
     pub entropy_weight_per_section: f32,
     pub entropy_section_cap: usize,
     pub packer_present_bump: f32,
@@ -39,6 +43,8 @@ pub struct PackedScorePolicy {
 
 impl PackedScorePolicy {
     pub const DEFAULT: Self = Self {
+        policy_version: PACKED_SCORE_POLICY_VERSION,
+        min_entropy_coverage_for_absence: 1.0,
         entropy_weight_per_section: 0.15,
         entropy_section_cap: 3,
         packer_present_bump: 0.35,

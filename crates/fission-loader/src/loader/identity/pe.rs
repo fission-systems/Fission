@@ -2,7 +2,7 @@
 
 use crate::loader::LoadedBinary;
 
-use super::evidence::EvidenceBudget;
+use super::evidence::AnalysisEvidenceCollector;
 use super::model::{
     EvidenceLocation, IdentityDetection, IdentityKind, IdentityScanLimits, IdentitySource,
 };
@@ -28,7 +28,7 @@ pub fn collect_pe_identity(
     binary: &LoadedBinary,
     limits: &IdentityScanLimits,
     detections: &mut Vec<IdentityDetection>,
-    evidence: &mut EvidenceBudget,
+    evidence: &mut AnalysisEvidenceCollector,
 ) {
     if !is_pe_format(&binary.format) {
         return;
@@ -42,7 +42,7 @@ fn section_name_signals(
     binary: &LoadedBinary,
     limits: &IdentityScanLimits,
     detections: &mut Vec<IdentityDetection>,
-    evidence: &mut EvidenceBudget,
+    evidence: &mut AnalysisEvidenceCollector,
 ) {
     let mut upx_evidence = Vec::new();
     let mut has_upx0 = false;
@@ -168,7 +168,7 @@ fn section_name_signals(
 fn import_signals(
     binary: &LoadedBinary,
     detections: &mut Vec<IdentityDetection>,
-    evidence: &mut EvidenceBudget,
+    evidence: &mut AnalysisEvidenceCollector,
 ) {
     let mut msvc_evidence = Vec::new();
     let needles = [
