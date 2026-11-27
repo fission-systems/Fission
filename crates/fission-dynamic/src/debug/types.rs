@@ -648,3 +648,233 @@ mod thread_selection_tests {
         );
     }
 }
+
+/// Schema version for epoch-bound live memory acquisition contracts.
+pub const LIVE_ACQUISITION_SCHEMA_VERSION: u16 = 1;
+
+/// Stable target process identity binding a capture against PID reuse or exit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProcessCaptureIdentity {
+    /// Host identifier (when known to the backend/session).
+    pub host_id: Option<String>,
+    /// Analysis/debugger session identifier.
+    pub session_id: String,
+    /// Numeric OS/guest process identifier (never sufficient alone when `lifetime_token` is absent).
+    pub pid: u32,
+    /// Backend-supplied process start time or lifetime token (e.g. Linux `/proc/<pid>/stat` starttime).
+    pub lifetime_token: Option<String>,
+    /// Target architecture label when known (e.g. `"x86_64"`, `"aarch64"`).
+    pub architecture: Option<String>,
+}
+
+/// Execution-consistency classification under which memory was sampled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureConsistency {
+    /// All observed target threads were suspended; shared mappings may still mutate externally.
+    StoppedAllObservedThreads,
+    /// Atomic OS/hypervisor point-in-time memory snapshot.
+    OsSnapshot,
+    /// Live target sampled without suspending all observed threads.
+    LiveBestEffort,
+    /// Backend cannot establish whether all threads were stopped during sampling.
+    Unknown,
+}
+
+/// Completeness of thread or module-mapping enumeration for an acquisition epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnumerationCompleteness {
+    Complete,
+    Partial,
+    Unavailable,
+}
+
+/// Explicit bounded epoch metadata recorded around a live memory capture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AcquisitionEpoch {
+    pub epoch_id: u64,
+    pub started_unix_ms: u64,
+    pub ended_unix_ms: u64,
+    pub consistency: CaptureConsistency,
+    /// Explicitly true unless taken from an atomic [`CaptureConsistency::OsSnapshot`].
+    pub shared_mappings_mutable: bool,
+    pub thread_enumeration: EnumerationCompleteness,
+    pub mapping_enumeration: EnumerationCompleteness,
+    pub observed_thread_ids_before: Vec<u32>,
+    pub observed_thread_ids_after: Vec<u32>,
+    pub threads_changed: bool,
+    pub mappings_changed: bool,
+    pub identity_stable: bool,
+}
+
+/// Distinguishes raw debugger-observed bytes from logical unpatched reconstructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryViewKind {
+    RawObserved,
+    LogicalUnpatched,
+}
+
+/// Debugger or acquisition-induced observer intervention intersecting a range.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DebuggerInterventionKind {
+    SoftwareBreakpointPatched {
+        #[serde(serialize_with = "serialize_hex_address")]
+        address: u64,
+        original_byte: u8,
+        enabled: bool,
+    },
+    MemoryWrite {
+        #[serde(serialize_with = "serialize_hex_address")]
+        address: u64,
+        size: usize,
+    },
+    ThreadSuspended {
+        thread_id: u32,
+    },
+    ThreadResumed {
+        thread_id: u32,
+    },
+}
+
+/// One recorded observer intervention overlapping an acquired memory interval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DebuggerIntervention {
+    pub kind: DebuggerInterventionKind,
+    pub detail: String,
+}
+
+/// Overall coherence verdict for an epoch-bound live memory acquisition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureCoherenceStatus {
+    Coherent,
+    Partial,
+    InconsistentRefused,
+}
+
+/// Policy and bounds governing [`super::traits::ExecutionBackend::acquire_epoch_bound_memory`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveAcquisitionOptions {
+    pub session_id: String,
+    pub epoch_id: u64,
+    pub sparse: super::memory::SparseReadOptions,
+    /// Fail closed when the backend does not report [`super::capabilities::DebugOperation::MemoryRead`].
+    pub require_memory_read_capability: bool,
+    /// Authorize best-effort capture on a running process; false never forces suspension.
+    pub allow_live_unstopped: bool,
+    /// Refuse capture (dropping raw observations) if module mappings churn mid-acquisition.
+    pub refuse_on_mapping_churn: bool,
+}
+
+impl Default for LiveAcquisitionOptions {
+    fn default() -> Self {
+        Self {
+            session_id: "default-session".to_string(),
+            epoch_id: 0,
+            sparse: super::memory::SparseReadOptions::default(),
+            require_memory_read_capability: true,
+            allow_live_unstopped: false,
+            refuse_on_mapping_churn: false,
+        }
+    }
+}
+
+/// Opt-in derived logical view with software-breakpoint patches restored from original bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DerivedLogicalMemoryView {
+    #[serde(serialize_with = "serialize_hex_address")]
+    pub base_address: u64,
+    pub view_kind: MemoryViewKind,
+    pub bytes: Vec<(u64, Vec<u8>)>,
+    pub applied_interventions: Vec<DebuggerIntervention>,
+}
+
+/// Sparse live memory capture explicitly bound to process identity, epoch, and observer interventions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EpochBoundMemoryCapture {
+    pub schema_version: u16,
+    pub identity: ProcessCaptureIdentity,
+    pub epoch: AcquisitionEpoch,
+    #[serde(serialize_with = "serialize_hex_address")]
+    pub requested_start: u64,
+    pub requested_size: usize,
+    pub view_kind: MemoryViewKind,
+    pub interventions: Vec<DebuggerIntervention>,
+    pub coherence: CaptureCoherenceStatus,
+    pub diagnostics: Vec<String>,
+    pub capture: Option<super::memory::SparseMemoryCapture>,
+}
+
+impl EpochBoundMemoryCapture {
+    /// Enforce strict identity and epoch binding before merging two memory captures.
+    pub fn can_merge_with(&self, other: &Self) -> Result<(), String> {
+        if self.coherence == CaptureCoherenceStatus::InconsistentRefused
+            || other.coherence == CaptureCoherenceStatus::InconsistentRefused
+        {
+            return Err("cannot merge an inconsistent/refused acquisition".to_string());
+        }
+        if !self.epoch.identity_stable || !other.epoch.identity_stable {
+            return Err(
+                "cannot merge acquisitions whose process identity did not remain stable"
+                    .to_string(),
+            );
+        }
+        if self.identity != other.identity {
+            return Err(
+                "cannot merge acquisitions from different process identities or lifetime tokens"
+                    .to_string(),
+            );
+        }
+        if self.epoch.epoch_id != other.epoch.epoch_id {
+            return Err(format!(
+                "cannot merge captures across different acquisition epochs ({} vs {})",
+                self.epoch.epoch_id, other.epoch.epoch_id
+            ));
+        }
+        if self.view_kind != other.view_kind {
+            return Err("cannot merge raw observed bytes with a derived logical view".to_string());
+        }
+        Ok(())
+    }
+
+    /// Derive a separate [`MemoryViewKind::LogicalUnpatched`] copy without altering raw observed bytes.
+    pub fn derive_logical_unpatched_view(&self) -> Result<DerivedLogicalMemoryView, String> {
+        let Some(ref raw_capture) = self.capture else {
+            return Err("no raw capture payload available for logical view derivation".to_string());
+        };
+
+        let mut runs: Vec<(u64, Vec<u8>)> = raw_capture
+            .observed_runs()
+            .map(|run| (run.start, run.bytes.clone()))
+            .collect();
+        let mut applied = Vec::new();
+
+        for iv in &self.interventions {
+            if let DebuggerInterventionKind::SoftwareBreakpointPatched {
+                address,
+                original_byte,
+                enabled: true,
+            } = iv.kind
+            {
+                for (run_start, bytes) in &mut runs {
+                    let run_end = run_start.saturating_add(bytes.len() as u64);
+                    if address >= *run_start && address < run_end {
+                        let offset = (address - *run_start) as usize;
+                        bytes[offset] = original_byte;
+                        applied.push(iv.clone());
+                    }
+                }
+            }
+        }
+
+        Ok(DerivedLogicalMemoryView {
+            base_address: self.requested_start,
+            view_kind: MemoryViewKind::LogicalUnpatched,
+            bytes: runs,
+            applied_interventions: applied,
+        })
+    }
+}
