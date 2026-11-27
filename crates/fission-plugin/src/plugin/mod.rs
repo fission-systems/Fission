@@ -9,5 +9,8 @@ pub use crate::contracts::traits::{
 };
 
 pub use api::PluginAPI;
-pub use hooks::{FissionEvent, FissionEventType, HookPriority, PluginHook};
+pub use hooks::{
+    FailurePolicy, FissionEvent, FissionEventType, HookDeliveryRecord, HookDispatchReport,
+    HookPriority, PluginDeliveryRecord, PluginHook, SubscriberOutcome,
+};
 pub use manager::PluginManager;

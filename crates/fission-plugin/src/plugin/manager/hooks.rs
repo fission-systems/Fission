@@ -1,7 +1,12 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use super::core::PluginManager;
-use crate::events::{FissionEvent, FissionEventType};
+use crate::events::{FissionEvent, FissionEventType, format_panic_payload};
 use crate::plugin::api::create_binary_info;
-use crate::plugin::{HookPriority, PluginHook};
+use crate::plugin::{
+    FailurePolicy, HookDeliveryRecord, HookDispatchReport, HookPriority, PluginDeliveryRecord,
+    PluginHook, SubscriberOutcome,
+};
 
 impl PluginManager {
     pub fn register_hook<F>(
@@ -49,29 +54,93 @@ impl PluginManager {
     }
 
     pub fn emit_event(&self, event: &FissionEvent) {
+        let _ = self.emit_event_with_policy(event, FailurePolicy::ContinueOnUnwind);
+    }
+
+    pub fn emit_event_checked(&self, event: &FissionEvent) -> HookDispatchReport {
+        self.emit_event_with_policy(event, FailurePolicy::ContinueOnUnwind)
+    }
+
+    pub fn emit_event_with_policy(
+        &self,
+        event: &FissionEvent,
+        failure_policy: FailurePolicy,
+    ) -> HookDispatchReport {
+        let event_type = event.event_type();
+        let mut plugin_outcomes = Vec::new();
+        let mut stop_remaining = false;
+        let mut complete = true;
+
         if let Some(api) = &self.api {
-            for plugin in self.plugins.values() {
-                if !plugin.info.enabled {
+            let mut active_plugins: Vec<_> = self
+                .plugins
+                .values()
+                .filter(|plugin| plugin.info.enabled && plugin.instance.is_some())
+                .collect();
+            active_plugins.sort_by(|a, b| a.info.id.cmp(&b.info.id));
+
+            for plugin in active_plugins {
+                let plugin_id = plugin.info.id.clone();
+                if stop_remaining {
+                    plugin_outcomes.push(PluginDeliveryRecord {
+                        plugin_id,
+                        outcome: SubscriberOutcome::SkippedAfterFailure,
+                    });
                     continue;
                 }
 
-                if let Some(instance) = &plugin.instance {
-                    let ctx = self.context_for_plugin(api, &plugin.info.id);
-                    match event {
-                        FissionEvent::BinaryLoaded(binary) => {
-                            let info = create_binary_info(binary.as_ref());
-                            instance.on_binary_loaded(&ctx, &info)
+                let Some(instance) = &plugin.instance else {
+                    continue;
+                };
+                let ctx = self.context_for_plugin(api, &plugin.info.id);
+
+                let dispatch_instance = || match event {
+                    FissionEvent::BinaryLoaded(binary) => {
+                        let info = create_binary_info(binary.as_ref());
+                        instance.on_binary_loaded(&ctx, &info);
+                    }
+                    FissionEvent::DecompilationSuccess { address, code, .. } => {
+                        instance.on_function_decompiled(&ctx, *address, code);
+                    }
+                    _ => {}
+                };
+
+                if !matches!(
+                    event,
+                    FissionEvent::BinaryLoaded(_) | FissionEvent::DecompilationSuccess { .. }
+                ) {
+                    continue;
+                }
+
+                if failure_policy == FailurePolicy::PropagatePanic {
+                    dispatch_instance();
+                    plugin_outcomes.push(PluginDeliveryRecord {
+                        plugin_id,
+                        outcome: SubscriberOutcome::Delivered,
+                    });
+                    continue;
+                }
+
+                match catch_unwind(AssertUnwindSafe(dispatch_instance)) {
+                    Ok(()) => plugin_outcomes.push(PluginDeliveryRecord {
+                        plugin_id,
+                        outcome: SubscriberOutcome::Delivered,
+                    }),
+                    Err(payload) => {
+                        complete = false;
+                        plugin_outcomes.push(PluginDeliveryRecord {
+                            plugin_id,
+                            outcome: SubscriberOutcome::Panicked {
+                                message: format_panic_payload(&*payload),
+                            },
+                        });
+                        if failure_policy == FailurePolicy::StopOnFirstFailure {
+                            stop_remaining = true;
                         }
-                        FissionEvent::DecompilationSuccess { address, code, .. } => {
-                            instance.on_function_decompiled(&ctx, *address, code)
-                        }
-                        _ => {}
                     }
                 }
             }
         }
-
-        let event_type = event.event_type();
 
         let mut matching_hooks: Vec<_> = self
             .hooks
@@ -88,10 +157,61 @@ impl PluginManager {
             })
             .collect();
 
-        matching_hooks.sort_by_key(|(hook, _)| hook.priority);
+        // Deterministic ordering: priority ascending, then stable hook registration ID.
+        matching_hooks.sort_by_key(|(hook, _)| (hook.priority, hook.id));
 
-        for (_, callback) in matching_hooks {
-            callback(event);
+        let mut hook_outcomes = Vec::with_capacity(matching_hooks.len());
+        for (hook, callback) in matching_hooks {
+            if stop_remaining {
+                hook_outcomes.push(HookDeliveryRecord {
+                    hook_id: hook.id,
+                    plugin_id: hook.plugin_id.clone(),
+                    priority: hook.priority,
+                    outcome: SubscriberOutcome::SkippedAfterFailure,
+                });
+                continue;
+            }
+
+            if failure_policy == FailurePolicy::PropagatePanic {
+                callback(event);
+                hook_outcomes.push(HookDeliveryRecord {
+                    hook_id: hook.id,
+                    plugin_id: hook.plugin_id.clone(),
+                    priority: hook.priority,
+                    outcome: SubscriberOutcome::Delivered,
+                });
+                continue;
+            }
+
+            match catch_unwind(AssertUnwindSafe(|| callback(event))) {
+                Ok(()) => hook_outcomes.push(HookDeliveryRecord {
+                    hook_id: hook.id,
+                    plugin_id: hook.plugin_id.clone(),
+                    priority: hook.priority,
+                    outcome: SubscriberOutcome::Delivered,
+                }),
+                Err(payload) => {
+                    complete = false;
+                    hook_outcomes.push(HookDeliveryRecord {
+                        hook_id: hook.id,
+                        plugin_id: hook.plugin_id.clone(),
+                        priority: hook.priority,
+                        outcome: SubscriberOutcome::Panicked {
+                            message: format_panic_payload(&*payload),
+                        },
+                    });
+                    if failure_policy == FailurePolicy::StopOnFirstFailure {
+                        stop_remaining = true;
+                    }
+                }
+            }
+        }
+
+        HookDispatchReport {
+            event_type,
+            plugin_outcomes,
+            hook_outcomes,
+            complete,
         }
     }
 }
