@@ -56,7 +56,12 @@ use serde::{Deserialize, Serialize};
 mod history;
 mod storage;
 pub use history::{DecisionChange, EditHistory, Revision};
-pub use storage::{CommitPrecondition, ProjectLock, ProjectRevision};
+pub use storage::{
+    AbandonedTempFile, CommitDurability, CommitPrecondition, CommitReceipt, InspectedLock,
+    LockIdentity, LockLiveness, MAX_INSPECTED_TEMP_FILES, MAX_LOCK_INSPECT_BYTES, ProjectLock,
+    ProjectRevision, ProjectStateStatus, RecoveryCleanupReport, RecoveryInspection,
+    StaleLockConfirmation, inspect_recovery, recover_abandoned_temps, remove_stale_lock,
+};
 
 /// The schema this crate writes. Bumped when a change would make an older
 /// reader misunderstand a file rather than merely miss a field.
@@ -210,6 +215,18 @@ pub enum ProjectError {
         expected: ProjectRevision,
         current: ProjectRevision,
     },
+    #[error(
+        "project commit outcome uncertain at {path} (revision {revision}, barrier={durability_barrier}): {reason}: {source}"
+    )]
+    CommitUncertain {
+        path: PathBuf,
+        revision: ProjectRevision,
+        durability_barrier: &'static str,
+        reason: String,
+        source: std::io::Error,
+    },
+    #[error("project recovery refused for {path}: {reason}")]
+    RecoveryRefused { path: PathBuf, reason: String },
 }
 
 /// A function signature somebody chose.
@@ -398,7 +415,19 @@ impl Project {
         path: &Path,
         precondition: CommitPrecondition,
     ) -> Result<ProjectRevision, ProjectError> {
-        ProjectLock::acquire(path)?.write_checked(self, precondition)
+        Ok(self
+            .commit_checked_with_receipt(path, precondition)?
+            .revision)
+    }
+
+    /// Commit `self` under [`ProjectLock`] and return its [`CommitReceipt`]
+    /// detailing the achieved durability barrier.
+    pub fn commit_checked_with_receipt(
+        &self,
+        path: &Path,
+        precondition: CommitPrecondition,
+    ) -> Result<CommitReceipt, ProjectError> {
+        ProjectLock::acquire(path)?.write_checked_with_receipt(self, precondition)
     }
 
     /// Create the project file only if it does not already exist.
