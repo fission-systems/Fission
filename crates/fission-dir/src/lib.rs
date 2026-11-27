@@ -42,6 +42,7 @@ pub mod eval;
 pub mod ground_truth;
 pub mod initial_state;
 pub mod lower_sym;
+pub mod metamorphic;
 pub mod native;
 pub mod product;
 pub mod report;
