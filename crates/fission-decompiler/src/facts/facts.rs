@@ -1353,25 +1353,27 @@ struct CachedCalleePcode {
 const CALLEE_SUMMARY_CACHE_CAPACITY: usize = 8192;
 const CALLEE_PCODE_CACHE_CAPACITY: usize = 2048;
 
-static CALLEE_SUMMARY_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64, u64), CalleeSummary>>> =
-    LazyLock::new(|| {
-        Mutex::new(lru::LruCache::new(
-            std::num::NonZeroUsize::new(CALLEE_SUMMARY_CACHE_CAPACITY).expect("non-zero capacity"),
-        ))
-    });
-
-/// Summaries being computed right now, so that workers needing the same
-/// summary at the same time wait for one computation instead of each running
-/// it. Decompile workers start together and share popular callees: on the
-/// full benchmark dataset 16% of `ssh-sk-helper`'s and 11% of `ssh`'s summary
-/// misses were a key another worker was already computing.
+/// Callee summaries coordinated through a generation-tagged single-flight
+/// LRU cache so concurrent workers outside Rayon deduplicate identical misses
+/// cleanly and unwind/panics abandon only the active generation while waking
+/// waiters without caching partial state.
 ///
-/// Only threads outside the rayon pool wait. A rayon worker blocked here can
-/// be the one the computing thread's own rayon work needs, so it computes
-/// the summary itself, as before.
-static CALLEE_SUMMARY_IN_FLIGHT: LazyLock<
-    Mutex<HashMap<(String, u64, u64), Arc<std::sync::OnceLock<CalleeSummary>>>>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Only threads outside the Rayon pool wait: a Rayon worker blocked here can
+/// be the one the computing thread's own nested Rayon work needs, so it uses
+/// [`super::single_flight::ExecutionMode::NonBlockingPool`].
+static CALLEE_SUMMARY_SINGLE_FLIGHT: LazyLock<
+    super::single_flight::SingleFlightCache<(String, u64, u64), CalleeSummary>,
+> = LazyLock::new(|| {
+    super::single_flight::SingleFlightCache::new(
+        std::num::NonZeroUsize::new(CALLEE_SUMMARY_CACHE_CAPACITY).expect("non-zero capacity"),
+    )
+});
+
+/// Snapshot of single-flight contention, deduplication, failure, and lock-hold
+/// counters for [`CALLEE_SUMMARY_SINGLE_FLIGHT`].
+pub fn callee_summary_single_flight_metrics() -> super::single_flight::SingleFlightMetricsSnapshot {
+    CALLEE_SUMMARY_SINGLE_FLIGHT.metrics_snapshot()
+}
 
 /// Callee decodes, keyed by address alone.
 ///
@@ -1385,6 +1387,22 @@ static CALLEE_PCODE_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64), CachedCal
             std::num::NonZeroUsize::new(CALLEE_PCODE_CACHE_CAPACITY).expect("non-zero capacity"),
         ))
     });
+
+fn lock_disposable_pcode_cache()
+-> std::sync::MutexGuard<'static, lru::LruCache<(String, u64), CachedCalleePcode>> {
+    match CALLEE_PCODE_CACHE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!(
+                "callee pcode cache lock poisoned; clearing disposable cache and recovering"
+            );
+            let mut guard = poisoned.into_inner();
+            guard.clear();
+            CALLEE_PCODE_CACHE.clear_poison();
+            guard
+        }
+    }
+}
 
 /// Hash of the context entries a callee's summary can depend on.
 fn callee_context_key(callee_pcode: &PcodeFunction, type_context: &NirTypeContext) -> u64 {
@@ -1420,11 +1438,7 @@ fn build_preview_callee_summaries(
     let instruction_limit = direct_callee_instruction_limit(max_bytes);
     let next_function = binary.function_after(target_addr).map(|func| func.address);
     let pcode_key = (binary.hash.clone(), target_addr);
-    let cached_pcode = CALLEE_PCODE_CACHE
-        .lock()
-        .expect("callee pcode cache poisoned")
-        .get(&pcode_key)
-        .cloned();
+    let cached_pcode = lock_disposable_pcode_cache().get(&pcode_key).cloned();
     let decoded = match cached_pcode {
         Some(hit) => hit,
         None => {
@@ -1446,10 +1460,7 @@ fn build_preview_callee_summaries(
                 pcode: Arc::new(pcode),
                 complete_decode,
             };
-            CALLEE_PCODE_CACHE
-                .lock()
-                .expect("callee pcode cache poisoned")
-                .put(pcode_key, decoded.clone());
+            lock_disposable_pcode_cache().put(pcode_key, decoded.clone());
             decoded
         }
     };
@@ -1461,15 +1472,12 @@ fn build_preview_callee_summaries(
         target_addr,
         callee_context_key(&decoded.pcode, type_context),
     );
-    if let Some(hit) = CALLEE_SUMMARY_CACHE
-        .lock()
-        .expect("callee summary cache poisoned")
-        .get(&cache_key)
-        .cloned()
-    {
-        return hit;
-    }
-    let compute = || {
+    let mode = if rayon::current_thread_index().is_some() {
+        super::single_flight::ExecutionMode::NonBlockingPool
+    } else {
+        super::single_flight::ExecutionMode::SingleFlight
+    };
+    let build = || {
         build_preview_callee_summaries_uncached(
             binary,
             target_addr,
@@ -1483,33 +1491,23 @@ fn build_preview_callee_summaries(
             decoded.complete_decode,
         )
     };
-    if rayon::current_thread_index().is_some() {
-        let computed = compute();
-        CALLEE_SUMMARY_CACHE
-            .lock()
-            .expect("callee summary cache poisoned")
-            .put(cache_key, computed.clone());
-        return computed;
+    match CALLEE_SUMMARY_SINGLE_FLIGHT.get_or_try_compute(cache_key, mode, || Ok(build())) {
+        Ok(summary) => summary,
+        Err(err) => {
+            // A panicking owner, a poisoned flight lock, or a cancelled waiter
+            // used to drop the summary silently. Recompute on this thread so a
+            // single failed flight does not degrade every later call site.
+            tracing::warn!(
+                target: "fission::facts",
+                address = format_args!("0x{target_addr:x}"),
+                %err,
+                "callee summary single-flight degraded; recomputing locally"
+            );
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(build))
+                .ok()
+                .flatten()
+        }
     }
-    let cell = Arc::clone(
-        CALLEE_SUMMARY_IN_FLIGHT
-            .lock()
-            .expect("callee summary in-flight map poisoned")
-            .entry(cache_key.clone())
-            .or_default(),
-    );
-    let computed = cell.get_or_init(compute).clone();
-    // Cache before leaving the in-flight map, so a late arrival finds the
-    // summary in one place or the other.
-    CALLEE_SUMMARY_CACHE
-        .lock()
-        .expect("callee summary cache poisoned")
-        .put(cache_key.clone(), computed.clone());
-    CALLEE_SUMMARY_IN_FLIGHT
-        .lock()
-        .expect("callee summary in-flight map poisoned")
-        .remove(&cache_key);
-    computed
 }
 
 #[allow(clippy::too_many_arguments)]
