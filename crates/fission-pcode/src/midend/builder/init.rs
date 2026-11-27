@@ -414,6 +414,7 @@ impl<'a> PreviewBuilder<'a> {
             instruction_loops_present: None,
             instruction_loop_exit: None,
             register_param_aliases,
+            register_param_observed_max_bits: HashMap::default(),
             entry_arity,
             declared_variadic_fixed_arity,
             suppress_entry_register_params: false,

@@ -1177,6 +1177,7 @@ impl<'a> PreviewBuilder<'a> {
             self.invalidate_materialization_dependent_caches();
             Some(previous)
         });
+        let saved_observed_max_bits = self.register_param_observed_max_bits.clone();
         let rhs = if scoped_loop_keys.is_some()
             && let Some(block_idx) = block_idx_for_rhs
         {
@@ -1196,8 +1197,16 @@ impl<'a> PreviewBuilder<'a> {
             }
             self.invalidate_materialization_dependent_caches();
         }
-        let Some(rhs) = rhs? else {
-            return Ok(None);
+        let rhs = match rhs {
+            Ok(Some(rhs)) => rhs,
+            Ok(None) => {
+                self.register_param_observed_max_bits = saved_observed_max_bits;
+                return Ok(None);
+            }
+            Err(err) => {
+                self.register_param_observed_max_bits = saved_observed_max_bits;
+                return Err(err);
+            }
         };
         let legacy_inline_candidate =
             self.output_replacement_is_complete(block, op_idx, output, &rhs);
@@ -1247,6 +1256,7 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .materialization
                 .representative_downgrade_count += 1;
+            self.register_param_observed_max_bits = saved_observed_max_bits;
             return Ok(None);
         }
         let no_consumer_profile =
@@ -1301,12 +1311,16 @@ impl<'a> PreviewBuilder<'a> {
                     &rhs,
                     suppression_enabled,
                 );
-                if suppression_enabled
-                    && merge_lhs_name.is_none()
-                    && direct_successor_merge_lhs_name.is_none()
-                {
-                    self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
-                    return Ok(None);
+                if merge_lhs_name.is_none() && direct_successor_merge_lhs_name.is_none() {
+                    // A provably consumer-free pure temporary op is dead even
+                    // when builder-side suppression is disabled (normalize DCE
+                    // deletes it); do not let its speculative read lock an ABI
+                    // parameter's width.
+                    self.register_param_observed_max_bits = saved_observed_max_bits;
+                    if suppression_enabled {
+                        self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
+                        return Ok(None);
+                    }
                 }
                 self.trace_no_consumer_kept(
                     block_addr,
