@@ -167,7 +167,7 @@ pub(crate) fn push_pcode_layer_with_coverage(
         }
         coverage.completed_units += 1;
 
-        for fact in &analyzer.facts {
+        for fact in analyzer.facts() {
             let (source, target, kind, pcode_op) = match fact {
                 VsaFact::DataRead {
                     instruction_addr,
