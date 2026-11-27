@@ -3,7 +3,9 @@
 //! Removes operations whose outputs are never used, except for operations
 //! with side effects (stores, calls, returns, branches).
 
-use crate::pcode::{PcodeFunction, PcodeOpcode, Varnode};
+use crate::pcode::{
+    CheckedIntrinsicOutcome, IntrinsicRegistry, IntrinsicScope, PcodeFunction, PcodeOpcode, Varnode,
+};
 use std::collections::HashMap;
 
 /// Dead code eliminator
@@ -29,8 +31,26 @@ impl DeadCodeEliminator {
         Self {}
     }
 
-    /// Eliminate dead code (operations with unused outputs)
+    /// Eliminate dead code (operations with unused outputs).
+    ///
+    /// Without an explicit [`IntrinsicRegistry`] + [`IntrinsicScope`], every
+    /// `CallOther` stays a conservative barrier.
     pub fn eliminate(&self, func: &mut PcodeFunction, modified: &mut bool) {
+        self.eliminate_with_intrinsics(func, modified, None);
+    }
+
+    /// Eliminate dead operations with unused outputs, consulting a version-scoped
+    /// [`IntrinsicRegistry`] for `PcodeOpcode::CallOther`.
+    ///
+    /// A `CallOther` is eligible for elimination only when the registry checks out its
+    /// scope, version, signature, and backend verification status AND proves it pure,
+    /// total, non-trapping, and unused at its output.
+    pub fn eliminate_with_intrinsics(
+        &self,
+        func: &mut PcodeFunction,
+        modified: &mut bool,
+        intrinsics: Option<(&IntrinsicRegistry, &IntrinsicScope)>,
+    ) {
         // Record half-open `[start, end)` byte intervals per address space so
         // reading a sub-register or super-register preserves the overlapping def.
         let mut used_ranges_by_space: HashMap<u64, Vec<(u64, u64)>> = HashMap::new();
@@ -68,28 +88,34 @@ impl DeadCodeEliminator {
         for block in &mut func.blocks {
             let original_len = block.ops.len();
 
-            block.ops.retain(|op| {
+            block.ops.retain(|op| match op.opcode {
+                PcodeOpcode::CallOther => {
+                    let eliminable = intrinsics.is_some_and(|(registry, scope)| {
+                        matches!(
+                            registry.check_pcode_op(scope, op),
+                            CheckedIntrinsicOutcome::Resolved(call) if call.eliminable_when_unused
+                        )
+                    });
+                    if eliminable && let Some(out) = &op.output {
+                        return is_varnode_used(&used_ranges_by_space, out);
+                    }
+                    true
+                }
                 // Keep operations with side effects
-                if matches!(
-                    op.opcode,
-                    PcodeOpcode::Store
-                        | PcodeOpcode::Call
-                        | PcodeOpcode::CallInd
-                        | PcodeOpcode::CallOther
-                        | PcodeOpcode::Return
-                        | PcodeOpcode::Branch
-                        | PcodeOpcode::CBranch
-                        | PcodeOpcode::BranchInd
-                ) {
-                    return true;
+                PcodeOpcode::Store
+                | PcodeOpcode::Call
+                | PcodeOpcode::CallInd
+                | PcodeOpcode::Return
+                | PcodeOpcode::Branch
+                | PcodeOpcode::CBranch
+                | PcodeOpcode::BranchInd => true,
+                _ => {
+                    if let Some(out) = &op.output {
+                        is_varnode_used(&used_ranges_by_space, out)
+                    } else {
+                        true
+                    }
                 }
-
-                // Keep if output overlaps any read byte range
-                if let Some(out) = &op.output {
-                    return is_varnode_used(&used_ranges_by_space, out);
-                }
-
-                true
             });
 
             if block.ops.len() < original_len {
