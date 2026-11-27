@@ -201,6 +201,219 @@ pub enum SymExpr {
     },
 }
 
+/// Supported IEEE 754 binary floating-point formats for concrete folding.
+///
+/// Unsupported widths (such as 16, 80, or 128 bits) are rejected rather than
+/// widened or inferred as 64-bit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FloatFormat {
+    Binary32,
+    Binary64,
+}
+
+impl FloatFormat {
+    pub const fn from_width_bits(width: u32) -> Option<Self> {
+        match width {
+            32 => Some(Self::Binary32),
+            64 => Some(Self::Binary64),
+            _ => None,
+        }
+    }
+
+    pub const fn width_bits(self) -> u32 {
+        match self {
+            Self::Binary32 => 32,
+            Self::Binary64 => 64,
+        }
+    }
+
+    pub const fn canonical_qnan_bits(self) -> u64 {
+        match self {
+            Self::Binary32 => 0x7fc0_0000,
+            Self::Binary64 => 0x7ff8_0000_0000_0000,
+        }
+    }
+}
+
+/// Rounding mode assumed when folding concrete IEEE 754 operations.
+///
+/// Fission currently models only round-to-nearest ties-to-even (native IEEE 754
+/// default in Rust `f32`/`f64` arithmetic on IEEE-compliant targets without
+/// host-level directed rounding overrides); operations that cannot guarantee
+/// this profile must disable folding via [`FpFoldProfile::NO_ARITHMETIC_FOLD`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FloatRoundingMode {
+    RoundNearestTiesToEven,
+}
+
+/// Policy for NaN inputs and NaN-producing operations during constant folding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NanFoldPolicy {
+    /// Leave any expression whose operand or result is NaN unfolded (`FAdd`,
+    /// `FDiv`, etc.) so downstream proof consumers preserve bit-pattern
+    /// uncertainty instead of proving a spurious equality against one chosen
+    /// NaN bit payload.
+    PreserveUncertainty,
+    /// Fold NaN results to the format's canonical quiet NaN pattern
+    /// (`0x7fc0_0000` for Binary32, `0x7ff8_0000_0000_0000` for Binary64).
+    /// Only valid when the caller explicitly accepts non-unique NaN payloads.
+    CanonicalQuiet,
+}
+
+/// Explicit semantics profile gating concrete floating-point folding.
+///
+/// Exception/sticky status flags (invalid, divide-by-zero, overflow,
+/// underflow, inexact) are not produced by AST nodes under any profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FpFoldProfile {
+    pub rounding: FloatRoundingMode,
+    pub fold_arithmetic: bool,
+    pub fold_predicates: bool,
+    pub nan_policy: NanFoldPolicy,
+}
+
+impl FpFoldProfile {
+    /// Default conservative profile: native target-width IEEE 754 RNE for
+    /// finite/zero/subnormal/infinity results, while keeping NaN inputs and
+    /// NaN-producing operations symbolic to preserve payload uncertainty.
+    pub const STRICT_IEEE754_RNE: Self = Self {
+        rounding: FloatRoundingMode::RoundNearestTiesToEven,
+        fold_arithmetic: true,
+        fold_predicates: true,
+        nan_policy: NanFoldPolicy::PreserveUncertainty,
+    };
+
+    /// Disable arithmetic folding completely while retaining numeric
+    /// comparison folding under IEEE 754 value semantics.
+    pub const NO_ARITHMETIC_FOLD: Self = Self {
+        rounding: FloatRoundingMode::RoundNearestTiesToEven,
+        fold_arithmetic: false,
+        fold_predicates: true,
+        nan_policy: NanFoldPolicy::PreserveUncertainty,
+    };
+}
+
+impl Default for FpFoldProfile {
+    fn default() -> Self {
+        Self::STRICT_IEEE754_RNE
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ConcreteFloat {
+    F32(f32),
+    F64(f64),
+}
+
+impl ConcreteFloat {
+    fn from_expr(e: &SymExpr) -> Option<Self> {
+        match e {
+            SymExpr::Const { val, size } => match FloatFormat::from_width_bits(*size)? {
+                FloatFormat::Binary32 => {
+                    Some(Self::F32(f32::from_bits((*val & 0xffff_ffff) as u32)))
+                }
+                FloatFormat::Binary64 => Some(Self::F64(f64::from_bits(*val))),
+            },
+            _ => None,
+        }
+    }
+
+    fn is_nan(self) -> bool {
+        match self {
+            Self::F32(x) => x.is_nan(),
+            Self::F64(x) => x.is_nan(),
+        }
+    }
+
+    fn format(self) -> FloatFormat {
+        match self {
+            Self::F32(_) => FloatFormat::Binary32,
+            Self::F64(_) => FloatFormat::Binary64,
+        }
+    }
+
+    fn to_expr(self, nan_policy: NanFoldPolicy) -> Option<SymExpr> {
+        if self.is_nan() {
+            return match nan_policy {
+                NanFoldPolicy::PreserveUncertainty => None,
+                NanFoldPolicy::CanonicalQuiet => Some(SymExpr::Const {
+                    val: self.format().canonical_qnan_bits(),
+                    size: self.format().width_bits(),
+                }),
+            };
+        }
+        let (val, size) = match self {
+            Self::F32(x) => (u64::from(x.to_bits()), 32),
+            Self::F64(x) => (x.to_bits(), 64),
+        };
+        Some(SymExpr::Const { val, size })
+    }
+}
+
+/// Format of a float or matching bit-pattern operand, when supported (`Binary32`
+/// or `Binary64`); returns `None` rather than inferring `Binary64` on unknown widths.
+pub fn checked_float_format(e: &SymExpr) -> Option<FloatFormat> {
+    match e.get_sort() {
+        Sort::Float(sz) | Sort::BitVector(sz) => FloatFormat::from_width_bits(sz),
+        Sort::Array { .. } => None,
+    }
+}
+
+fn fold_float_binop(
+    a: &SymExpr,
+    b: &SymExpr,
+    profile: FpFoldProfile,
+    f32_op: fn(f32, f32) -> f32,
+    f64_op: fn(f64, f64) -> f64,
+) -> Option<SymExpr> {
+    if !profile.fold_arithmetic {
+        return None;
+    }
+    let _ = profile.rounding;
+    let res = match (ConcreteFloat::from_expr(a)?, ConcreteFloat::from_expr(b)?) {
+        (ConcreteFloat::F32(x), ConcreteFloat::F32(y)) => {
+            if profile.nan_policy == NanFoldPolicy::PreserveUncertainty
+                && (x.is_nan() || y.is_nan())
+            {
+                return None;
+            }
+            ConcreteFloat::F32(f32_op(x, y))
+        }
+        (ConcreteFloat::F64(x), ConcreteFloat::F64(y)) => {
+            if profile.nan_policy == NanFoldPolicy::PreserveUncertainty
+                && (x.is_nan() || y.is_nan())
+            {
+                return None;
+            }
+            ConcreteFloat::F64(f64_op(x, y))
+        }
+        _ => return None,
+    };
+    res.to_expr(profile.nan_policy)
+}
+
+fn fold_float_pred(
+    a: &SymExpr,
+    b: &SymExpr,
+    profile: FpFoldProfile,
+    f32_pred: fn(f32, f32) -> bool,
+    f64_pred: fn(f64, f64) -> bool,
+) -> Option<SymExpr> {
+    if !profile.fold_predicates {
+        return None;
+    }
+    let _ = profile.rounding;
+    let flag = match (ConcreteFloat::from_expr(a)?, ConcreteFloat::from_expr(b)?) {
+        (ConcreteFloat::F32(x), ConcreteFloat::F32(y)) => f32_pred(x, y),
+        (ConcreteFloat::F64(x), ConcreteFloat::F64(y)) => f64_pred(x, y),
+        _ => return None,
+    };
+    Some(SymExpr::Const {
+        val: u64::from(flag),
+        size: 1,
+    })
+}
+
 impl SymExpr {
     /// Create a bitvector variable. `width_bits` is measured in bits.
     pub fn new_var(name: &str, width_bits: u32) -> Self {
@@ -497,7 +710,8 @@ impl SymExpr {
     }
 
     /// Construct a float-sorted variable. IEEE circuits currently require a
-    /// 32- or 64-bit payload; other widths are preserved and lower as Unknown.
+    /// 32- or 64-bit payload; other widths are preserved cleanly in `get_sort()`
+    /// and rejected by [`checked_float_format`] / folding constructors.
     pub fn new_float_var(name: &str, width_bits: u32) -> Self {
         let id = VAR_COUNTER.fetch_add(1, Ordering::SeqCst);
         Self::Var {
@@ -507,77 +721,44 @@ impl SymExpr {
         }
     }
 
-    fn float_size_of(e: &SymExpr) -> u32 {
-        match e.get_sort() {
-            Sort::Float(sz) | Sort::BitVector(sz) => {
-                if sz == 32 || sz == 64 {
-                    sz
-                } else {
-                    64
-                }
-            }
-            _ => 64,
-        }
-    }
-
-    fn as_f64_bits(e: &SymExpr) -> Option<(f64, u32)> {
-        match e {
-            Self::Const {
-                val,
-                size: width_bits @ (32 | 64),
-            } => {
-                let f = if *width_bits == 32 {
-                    f32::from_bits(*val as u32) as f64
-                } else {
-                    f64::from_bits(*val)
-                };
-                Some((f, *width_bits))
-            }
-            _ => None,
-        }
-    }
-
-    fn fconst(val: f64, size: u32) -> Self {
-        let bits = if size == 32 {
-            (val as f32).to_bits() as u64
-        } else {
-            val.to_bits()
-        };
-        Self::Const { val: bits, size }
+    pub fn new_fadd_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_binop(&a, &b, profile, |x, y| x + y, |x, y| x + y)
+            .unwrap_or_else(|| Self::FAdd(Box::new(a), Box::new(b)))
     }
 
     pub fn new_fadd(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, sz)), Some((y, other_sz))) if sz == other_sz => Self::fconst(x + y, sz),
-            _ => Self::FAdd(Box::new(a), Box::new(b)),
-        }
+        Self::new_fadd_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    pub fn new_fsub_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_binop(&a, &b, profile, |x, y| x - y, |x, y| x - y)
+            .unwrap_or_else(|| Self::FSub(Box::new(a), Box::new(b)))
     }
 
     pub fn new_fsub(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, sz)), Some((y, other_sz))) if sz == other_sz => Self::fconst(x - y, sz),
-            _ => Self::FSub(Box::new(a), Box::new(b)),
-        }
+        Self::new_fsub_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    pub fn new_fmul_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_binop(&a, &b, profile, |x, y| x * y, |x, y| x * y)
+            .unwrap_or_else(|| Self::FMul(Box::new(a), Box::new(b)))
     }
 
     pub fn new_fmul(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, sz)), Some((y, other_sz))) if sz == other_sz => Self::fconst(x * y, sz),
-            _ => Self::FMul(Box::new(a), Box::new(b)),
-        }
+        Self::new_fmul_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    pub fn new_fdiv_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_binop(&a, &b, profile, |x, y| x / y, |x, y| x / y)
+            .unwrap_or_else(|| Self::FDiv(Box::new(a), Box::new(b)))
     }
 
     pub fn new_fdiv(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, sz)), Some((y, other_sz))) if sz == other_sz => Self::fconst(x / y, sz),
-            _ => Self::FDiv(Box::new(a), Box::new(b)),
-        }
+        Self::new_fdiv_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
     }
 
     /// Negation flips the sign bit and touches nothing else -- on the bit
-    /// pattern, as lowering does. Going through `f64` to negate a 32-bit
-    /// constant quieted a signalling NaN on the way, so the folded constant
-    /// and the circuit disagreed about the payload.
+    /// pattern, as lowering does, preserving sNaN/qNaN payloads intact.
     pub fn new_fneg(a: SymExpr) -> Self {
         match a {
             Self::Const {
@@ -605,61 +786,90 @@ impl SymExpr {
         }
     }
 
-    pub fn new_fsqrt(a: SymExpr) -> Self {
-        match Self::as_f64_bits(&a) {
-            Some((x, sz)) => Self::fconst(x.sqrt(), sz),
-            None => Self::FSqrt(Box::new(a)),
+    pub fn new_fsqrt_with_profile(a: SymExpr, profile: FpFoldProfile) -> Self {
+        if profile.fold_arithmetic {
+            let _ = profile.rounding;
+            if let Some(cf) = ConcreteFloat::from_expr(&a) {
+                let folded = match cf {
+                    ConcreteFloat::F32(x)
+                        if !(profile.nan_policy == NanFoldPolicy::PreserveUncertainty
+                            && x.is_nan()) =>
+                    {
+                        ConcreteFloat::F32(x.sqrt()).to_expr(profile.nan_policy)
+                    }
+                    ConcreteFloat::F64(x)
+                        if !(profile.nan_policy == NanFoldPolicy::PreserveUncertainty
+                            && x.is_nan()) =>
+                    {
+                        ConcreteFloat::F64(x.sqrt()).to_expr(profile.nan_policy)
+                    }
+                    _ => None,
+                };
+                if let Some(expr) = folded {
+                    return expr;
+                }
+            }
         }
+        Self::FSqrt(Box::new(a))
+    }
+
+    pub fn new_fsqrt(a: SymExpr) -> Self {
+        Self::new_fsqrt_with_profile(a, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    /// IEEE 754 numeric equality (`+0.0 == -0.0`, `NaN != NaN`), distinct from
+    /// raw bitvector equality (`Self::new_eq`).
+    pub fn new_feq_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_pred(&a, &b, profile, |x, y| x == y, |x, y| x == y)
+            .unwrap_or_else(|| Self::FEq(Box::new(a), Box::new(b)))
     }
 
     pub fn new_feq(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, x_width)), Some((y, y_width))) if x_width == y_width => Self::Const {
-                val: u64::from(x == y),
-                size: 1,
-            },
-            _ => Self::FEq(Box::new(a), Box::new(b)),
-        }
+        Self::new_feq_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    /// IEEE 754 numeric inequality (`NaN != NaN` is true).
+    pub fn new_fneq_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_pred(&a, &b, profile, |x, y| x != y, |x, y| x != y)
+            .unwrap_or_else(|| Self::FNeq(Box::new(a), Box::new(b)))
     }
 
     pub fn new_fneq(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, x_width)), Some((y, y_width))) if x_width == y_width => Self::Const {
-                val: u64::from(x != y),
-                size: 1,
-            },
-            _ => Self::FNeq(Box::new(a), Box::new(b)),
-        }
+        Self::new_fneq_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    pub fn new_flt_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_pred(&a, &b, profile, |x, y| x < y, |x, y| x < y)
+            .unwrap_or_else(|| Self::FLt(Box::new(a), Box::new(b)))
     }
 
     pub fn new_flt(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, x_width)), Some((y, y_width))) if x_width == y_width => Self::Const {
-                val: u64::from(x < y),
-                size: 1,
-            },
-            _ => Self::FLt(Box::new(a), Box::new(b)),
-        }
+        Self::new_flt_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    pub fn new_fle_with_profile(a: SymExpr, b: SymExpr, profile: FpFoldProfile) -> Self {
+        fold_float_pred(&a, &b, profile, |x, y| x <= y, |x, y| x <= y)
+            .unwrap_or_else(|| Self::FLe(Box::new(a), Box::new(b)))
     }
 
     pub fn new_fle(a: SymExpr, b: SymExpr) -> Self {
-        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
-            (Some((x, x_width)), Some((y, y_width))) if x_width == y_width => Self::Const {
-                val: u64::from(x <= y),
-                size: 1,
-            },
-            _ => Self::FLe(Box::new(a), Box::new(b)),
+        Self::new_fle_with_profile(a, b, FpFoldProfile::STRICT_IEEE754_RNE)
+    }
+
+    pub fn new_fisnan_with_profile(a: SymExpr, profile: FpFoldProfile) -> Self {
+        if profile.fold_predicates {
+            if let Some(cf) = ConcreteFloat::from_expr(&a) {
+                return Self::Const {
+                    val: u64::from(cf.is_nan()),
+                    size: 1,
+                };
+            }
         }
+        Self::FIsNan(Box::new(a))
     }
 
     pub fn new_fisnan(a: SymExpr) -> Self {
-        match Self::as_f64_bits(&a) {
-            Some((x, _)) => Self::Const {
-                val: u64::from(x.is_nan()),
-                size: 1,
-            },
-            None => Self::FIsNan(Box::new(a)),
-        }
+        Self::new_fisnan_with_profile(a, FpFoldProfile::STRICT_IEEE754_RNE)
     }
 
     /// Elaborate and validate `self` standalone, returning its checked sort.
@@ -715,7 +925,10 @@ impl SymExpr {
             | Self::FDiv(a, _)
             | Self::FNeg(a)
             | Self::FAbs(a)
-            | Self::FSqrt(a) => Sort::Float(Self::float_size_of(a)),
+            | Self::FSqrt(a) => match a.get_sort() {
+                Sort::Float(w) | Sort::BitVector(w) => Sort::Float(w),
+                Sort::Array { .. } => Sort::Float(0),
+            },
             Self::FEq(_, _)
             | Self::FNeq(_, _)
             | Self::FLt(_, _)
