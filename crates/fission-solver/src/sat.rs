@@ -1,4 +1,646 @@
-use crate::cnf::{Clause, Lit};
+use crate::ast::{Sort, SymExpr, SymNodeId};
+use crate::cnf::{parse_dimacs_cnf, sha256_hex, to_dimacs_cnf, Clause, Lit};
+use crate::validate::{validate_query_with_nodes, ValidationError};
+use std::collections::HashMap;
+use std::fmt;
+
+pub const ENCODING_VERSION: &str = "fission-pure-bv-aig-tseitin-v1";
+pub const SOLVER_VERSION: &str = concat!("fission-solver-cdcl-", env!("CARGO_PKG_VERSION"));
+pub const CHECKER_VERSION: &str = "fission-rup-drat-checker-v1";
+pub const TCB_SCOPE_STATEMENT: &str = "An independently checked RUP/DRAT refutation proves unsatisfiability of the exported DIMACS CNF plus assumptions only; it does not verify binary lifting, bit-blasting/Tseitin encoding equivalence, or target ISA semantics.";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DratStep {
+    Add(Vec<Lit>),
+    Delete(Vec<Lit>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DratProof {
+    pub steps: Vec<DratStep>,
+    pub truncated: bool,
+}
+
+impl DratProof {
+    /// Deterministic text DRAT serialization (`<lits...> 0` for additions, `d <lits...> 0` for deletions).
+    pub fn to_drat_text(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        for step in &self.steps {
+            let lits = match step {
+                DratStep::Add(lits) => lits,
+                DratStep::Delete(lits) => {
+                    out.push_str("d ");
+                    lits
+                }
+            };
+            for lit in lits {
+                let _ = write!(out, "{} ", lit.0);
+            }
+            out.push_str("0\n");
+        }
+        out
+    }
+
+    pub fn parse_drat_text(text: &str) -> Result<Vec<DratStep>, ProofCheckError> {
+        let mut steps = Vec::new();
+        for (line_idx, raw_line) in text.lines().enumerate() {
+            let line_no = line_idx + 1;
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('c') {
+                continue;
+            }
+            let mut tokens = line.split_whitespace().peekable();
+            let is_delete = tokens.peek() == Some(&"d");
+            if is_delete {
+                tokens.next();
+            }
+            let mut lits = Vec::new();
+            let mut terminated = false;
+            for tok in tokens {
+                if terminated {
+                    return Err(ProofCheckError::InvalidDrat(format!(
+                        "line {line_no}: unexpected token `{tok}` after clause terminator `0`"
+                    )));
+                }
+                let val = tok.parse::<i32>().map_err(|e| {
+                    ProofCheckError::InvalidDrat(format!(
+                        "line {line_no}: invalid literal `{tok}`: {e}"
+                    ))
+                })?;
+                if val == 0 {
+                    terminated = true;
+                } else {
+                    lits.push(Lit(val));
+                }
+            }
+            if !terminated {
+                return Err(ProofCheckError::InvalidDrat(format!(
+                    "line {line_no}: missing clause terminator `0`"
+                )));
+            }
+            steps.push(if is_delete {
+                DratStep::Delete(lits)
+            } else {
+                DratStep::Add(lits)
+            });
+        }
+        Ok(steps)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProofCheckerLimits {
+    pub max_steps: usize,
+    pub max_propagations: usize,
+}
+
+impl Default for ProofCheckerLimits {
+    fn default() -> Self {
+        Self {
+            max_steps: 200_000,
+            max_propagations: 20_000_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProofCheckError {
+    InvalidCnf(String),
+    InvalidDrat(String),
+    UnknownVariable {
+        step: usize,
+        lit: Lit,
+        num_vars: u32,
+    },
+    UnknownAssumptionVariable {
+        lit: Lit,
+        num_vars: u32,
+    },
+    RupCheckFailed {
+        step: usize,
+        clause: Vec<Lit>,
+    },
+    MissingEmptyClause,
+    ResourceLimitExceeded {
+        kind: &'static str,
+        limit: usize,
+    },
+}
+
+impl fmt::Display for ProofCheckError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidCnf(msg) => write!(f, "invalid DIMACS CNF: {msg}"),
+            Self::InvalidDrat(msg) => write!(f, "invalid DRAT text: {msg}"),
+            Self::UnknownVariable {
+                step,
+                lit,
+                num_vars,
+            } => write!(
+                f,
+                "DRAT step {step} references literal {} outside declared num_vars {num_vars}",
+                lit.0
+            ),
+            Self::UnknownAssumptionVariable { lit, num_vars } => write!(
+                f,
+                "assumption literal {} outside declared num_vars {num_vars}",
+                lit.0
+            ),
+            Self::RupCheckFailed { step, clause } => write!(
+                f,
+                "RUP verification failed at DRAT step {step} for clause {:?}",
+                clause.iter().map(|l| l.0).collect::<Vec<_>>()
+            ),
+            Self::MissingEmptyClause => {
+                write!(f, "DRAT proof did not derive the empty clause")
+            }
+            Self::ResourceLimitExceeded { kind, limit } => {
+                write!(f, "proof checker {kind} limit exceeded ({limit})")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProofCheckError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedRefutationReport {
+    pub checker_version: &'static str,
+    pub cnf_sha256: String,
+    pub drat_sha256: String,
+    pub num_vars: u32,
+    pub input_clauses: usize,
+    pub assumption_clauses: usize,
+    pub verified_add_steps: usize,
+    pub delete_steps: usize,
+    pub propagations: usize,
+}
+
+/// Standalone, solver-independent RUP/DRAT proof checker for bounded CNF + assumptions.
+pub fn verify_drat_rup_proof(
+    dimacs_cnf: &str,
+    assumptions: &[Lit],
+    drat_text: &str,
+    limits: ProofCheckerLimits,
+) -> Result<CheckedRefutationReport, ProofCheckError> {
+    let (num_vars, parsed_clauses) =
+        parse_dimacs_cnf(dimacs_cnf).map_err(ProofCheckError::InvalidCnf)?;
+    let steps = DratProof::parse_drat_text(drat_text)?;
+    if steps.len() > limits.max_steps {
+        return Err(ProofCheckError::ResourceLimitExceeded {
+            kind: "steps",
+            limit: limits.max_steps,
+        });
+    }
+
+    let normalize_clause = |mut lits: Vec<Lit>| -> Vec<Lit> {
+        lits.sort_by_key(|l| l.0);
+        lits.dedup();
+        lits
+    };
+
+    let mut active_clauses: Vec<Option<Vec<Lit>>> =
+        Vec::with_capacity(parsed_clauses.len() + assumptions.len() + steps.len());
+    let input_clauses = parsed_clauses.len();
+    for clause in parsed_clauses {
+        active_clauses.push(Some(normalize_clause(clause.0)));
+    }
+    for &lit in assumptions {
+        let var = lit.var();
+        if var == 0 || var > num_vars {
+            return Err(ProofCheckError::UnknownAssumptionVariable { lit, num_vars });
+        }
+        active_clauses.push(Some(vec![lit]));
+    }
+
+    let mut assigns = vec![0_i8; num_vars as usize + 1];
+    let mut propagations = 0usize;
+    let mut verified_add_steps = 0usize;
+    let mut delete_steps = 0usize;
+    let mut derived_empty = false;
+
+    for (step_idx, step) in steps.into_iter().enumerate() {
+        match step {
+            DratStep::Delete(raw_lits) => {
+                for &lit in &raw_lits {
+                    let var = lit.var();
+                    if var == 0 || var > num_vars {
+                        return Err(ProofCheckError::UnknownVariable {
+                            step: step_idx,
+                            lit,
+                            num_vars,
+                        });
+                    }
+                }
+                let target = normalize_clause(raw_lits);
+                if let Some(slot) = active_clauses
+                    .iter_mut()
+                    .rev()
+                    .find(|entry| entry.as_ref() == Some(&target))
+                {
+                    *slot = None;
+                }
+                delete_steps += 1;
+            }
+            DratStep::Add(raw_lits) => {
+                for &lit in &raw_lits {
+                    let var = lit.var();
+                    if var == 0 || var > num_vars {
+                        return Err(ProofCheckError::UnknownVariable {
+                            step: step_idx,
+                            lit,
+                            num_vars,
+                        });
+                    }
+                }
+                let lits = normalize_clause(raw_lits);
+                if !check_clause_rup(
+                    &active_clauses,
+                    &lits,
+                    &mut assigns,
+                    &mut propagations,
+                    limits.max_propagations,
+                )? {
+                    return Err(ProofCheckError::RupCheckFailed {
+                        step: step_idx,
+                        clause: lits,
+                    });
+                }
+                verified_add_steps += 1;
+                if lits.is_empty() {
+                    derived_empty = true;
+                    break;
+                }
+                active_clauses.push(Some(lits));
+            }
+        }
+    }
+
+    if !derived_empty {
+        return Err(ProofCheckError::MissingEmptyClause);
+    }
+
+    Ok(CheckedRefutationReport {
+        checker_version: CHECKER_VERSION,
+        cnf_sha256: sha256_hex(dimacs_cnf.as_bytes()),
+        drat_sha256: sha256_hex(drat_text.as_bytes()),
+        num_vars,
+        input_clauses,
+        assumption_clauses: assumptions.len(),
+        verified_add_steps,
+        delete_steps,
+        propagations,
+    })
+}
+
+fn check_clause_rup(
+    active_clauses: &[Option<Vec<Lit>>],
+    lits: &[Lit],
+    assigns: &mut [i8],
+    propagations: &mut usize,
+    max_propagations: usize,
+) -> Result<bool, ProofCheckError> {
+    let mut trail: Vec<u32> = Vec::with_capacity(lits.len() + 16);
+
+    // Assume the negation of every literal in `lits`. If both `x` and `!x` are
+    // present in `lits`, it is a tautology (trivially implied; not added).
+    for &lit in lits {
+        let var = lit.var() as usize;
+        let current = assigns[var];
+        let want_var = if lit.0 > 0 { -1_i8 } else { 1_i8 };
+        if current == -want_var {
+            for v in trail {
+                assigns[v as usize] = 0;
+            }
+            return Ok(true);
+        }
+        if current == 0 {
+            assigns[var] = want_var;
+            trail.push(lit.var());
+        }
+    }
+
+    loop {
+        let mut progressed = false;
+        for clause in active_clauses.iter().flatten() {
+            let mut satisfied = false;
+            let mut undef_count = 0usize;
+            let mut unit_lit = Lit(0);
+            for &lit in clause {
+                let a = assigns[lit.var() as usize];
+                let lval = if a == 0 {
+                    0
+                } else if (lit.0 > 0 && a > 0) || (lit.0 < 0 && a < 0) {
+                    1
+                } else {
+                    -1
+                };
+                if lval > 0 {
+                    satisfied = true;
+                    break;
+                }
+                if lval == 0 {
+                    undef_count += 1;
+                    unit_lit = lit;
+                    if undef_count > 1 {
+                        break;
+                    }
+                }
+            }
+            if satisfied {
+                continue;
+            }
+            if undef_count == 0 {
+                for v in trail {
+                    assigns[v as usize] = 0;
+                }
+                return Ok(true);
+            }
+            if undef_count == 1 {
+                *propagations += 1;
+                if *propagations > max_propagations {
+                    for v in trail {
+                        assigns[v as usize] = 0;
+                    }
+                    return Err(ProofCheckError::ResourceLimitExceeded {
+                        kind: "propagations",
+                        limit: max_propagations,
+                    });
+                }
+                let var = unit_lit.var() as usize;
+                assigns[var] = if unit_lit.0 > 0 { 1 } else { -1 };
+                trail.push(unit_lit.var());
+                progressed = true;
+            }
+        }
+        if !progressed {
+            for v in trail {
+                assigns[v as usize] = 0;
+            }
+            return Ok(false);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CertifiedQueryConfig {
+    pub require_certificate: bool,
+    pub conflict_budget: Option<u64>,
+    pub proof_step_budget: Option<usize>,
+    pub checker_limits: ProofCheckerLimits,
+}
+
+impl Default for CertifiedQueryConfig {
+    fn default() -> Self {
+        Self {
+            require_certificate: true,
+            conflict_budget: None,
+            proof_step_budget: None,
+            checker_limits: ProofCheckerLimits::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefutationCertificate {
+    pub encoding_version: &'static str,
+    pub solver_version: &'static str,
+    pub checker_version: &'static str,
+    pub tcb_scope: &'static str,
+    pub assertions_debug: Vec<String>,
+    pub assumptions_debug: Vec<String>,
+    pub num_vars: u32,
+    pub dimacs_cnf: String,
+    pub cnf_sha256: String,
+    pub assumption_lits: Vec<Lit>,
+    pub drat_proof: String,
+    pub drat_sha256: String,
+    pub conflict_budget: Option<u64>,
+    pub proof_step_budget: Option<usize>,
+    pub check_report: CheckedRefutationReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CertifiedVerdict {
+    Sat,
+    UnsatCertified(Box<RefutationCertificate>),
+    UnsatUnchecked { reason: String },
+    Unsupported { reasons: Vec<String> },
+    BudgetExhausted { stage: &'static str },
+    CertificateCheckFailed { error: ProofCheckError },
+}
+
+fn collect_pure_bv_nodes(
+    expr: &SymExpr,
+    nodes: &mut HashMap<SymNodeId, SymExpr>,
+    unsupported: &mut Vec<String>,
+) {
+    expr.visit_preorder(&mut |node| {
+        match node.get_sort() {
+            Sort::Array { .. } => unsupported.push(format!(
+                "array sort unsupported in pure BV: {:?}",
+                node.get_sort()
+            )),
+            Sort::Float(_) => unsupported.push(format!(
+                "float sort unsupported in pure BV: {:?}",
+                node.get_sort()
+            )),
+            Sort::BitVector(_) => {}
+        }
+        match node {
+            SymExpr::Var { id, .. } => {
+                nodes.entry(*id).or_insert_with(|| node.clone());
+            }
+            SymExpr::ArraySelect { .. } | SymExpr::ArrayStore { .. } => {
+                unsupported
+                    .push("array theory operation outside pure-BV certificate scope".to_string());
+            }
+            SymExpr::FAdd(..)
+            | SymExpr::FSub(..)
+            | SymExpr::FMul(..)
+            | SymExpr::FDiv(..)
+            | SymExpr::FNeg(_)
+            | SymExpr::FAbs(_)
+            | SymExpr::FSqrt(_)
+            | SymExpr::FEq(..)
+            | SymExpr::FNeq(..)
+            | SymExpr::FLt(..)
+            | SymExpr::FLe(..)
+            | SymExpr::FIsNan(_) => {
+                unsupported
+                    .push("floating-point operation outside pure-BV certificate scope".to_string());
+            }
+            _ => {}
+        }
+    });
+}
+
+fn validation_error_summary(err: &ValidationError) -> String {
+    format!("{err:?}")
+}
+
+/// Evaluate a bounded pure bitvector query on a fresh solver, and on UNSAT
+/// optionally log and independently verify a DRAT/RUP refutation certificate.
+pub fn solve_pure_bv_certified(
+    assertions: &[SymExpr],
+    assumptions: &[SymExpr],
+    config: &CertifiedQueryConfig,
+) -> CertifiedVerdict {
+    let mut nodes: HashMap<SymNodeId, SymExpr> = HashMap::new();
+    let mut unsupported_reasons: Vec<String> = Vec::new();
+    for expr in assertions.iter().chain(assumptions.iter()) {
+        collect_pure_bv_nodes(expr, &mut nodes, &mut unsupported_reasons);
+    }
+    if !unsupported_reasons.is_empty() {
+        unsupported_reasons.sort();
+        unsupported_reasons.dedup();
+        return CertifiedVerdict::Unsupported {
+            reasons: unsupported_reasons,
+        };
+    }
+
+    if let Err(err) = validate_query_with_nodes(assertions, assumptions, &nodes) {
+        return CertifiedVerdict::Unsupported {
+            reasons: vec![validation_error_summary(&err)],
+        };
+    }
+
+    let mut bv = crate::theory::bitvector::BvTheorySolver::new();
+    for expr in assertions {
+        bv.assert_expr(expr);
+    }
+
+    let mut assumption_lits: Vec<Lit> = Vec::with_capacity(assumptions.len());
+    let mut extra_empty_clause = false;
+    for expr in assumptions {
+        let bits = bv.aig.lower_expr(expr);
+        if bits.len() != 1 {
+            return CertifiedVerdict::Unsupported {
+                reasons: vec![format!(
+                    "assumption is {} bits wide, expected 1",
+                    bits.len()
+                )],
+            };
+        }
+        match bits[0] {
+            crate::aig::AigLit::TRUE => {}
+            crate::aig::AigLit::FALSE => extra_empty_clause = true,
+            aig_lit => assumption_lits.push(bv.cnf.get_cnf_lit(aig_lit)),
+        }
+    }
+
+    bv.aig.to_cnf(&mut bv.cnf);
+    if !bv.unsupported().is_empty() {
+        return CertifiedVerdict::Unsupported {
+            reasons: bv.unsupported().to_vec(),
+        };
+    }
+
+    let mut input_clauses = std::mem::take(&mut bv.cnf.clauses);
+    if extra_empty_clause {
+        input_clauses.push(Clause(vec![]));
+    }
+    let num_vars = bv.cnf.num_vars();
+    let dimacs_cnf = to_dimacs_cnf(&input_clauses, num_vars);
+    let cnf_sha256 = sha256_hex(dimacs_cnf.as_bytes());
+
+    let mut sat = SatSolver::new();
+    sat.set_conflict_budget(config.conflict_budget);
+    sat.enable_proof_logging(config.proof_step_budget);
+
+    let mut added_ok = true;
+    for clause in &input_clauses {
+        if !sat.add_clause(clause.0.clone()) {
+            added_ok = false;
+            break;
+        }
+    }
+
+    let outcome = if !added_ok {
+        Some(false)
+    } else {
+        sat.solve_limited(None, &assumption_lits)
+    };
+
+    match outcome {
+        None => CertifiedVerdict::BudgetExhausted {
+            stage: "sat_search",
+        },
+        Some(true) => CertifiedVerdict::Sat,
+        Some(false) => {
+            if let Some(reason) = sat.proof_tainted_reason() {
+                if config.require_certificate {
+                    return CertifiedVerdict::Unsupported {
+                        reasons: vec![reason.to_string()],
+                    };
+                }
+                return CertifiedVerdict::UnsatUnchecked {
+                    reason: reason.to_string(),
+                };
+            }
+            let Some(proof) = sat.proof() else {
+                let reason = "proof logger disabled".to_string();
+                return if config.require_certificate {
+                    CertifiedVerdict::CertificateCheckFailed {
+                        error: ProofCheckError::MissingEmptyClause,
+                    }
+                } else {
+                    CertifiedVerdict::UnsatUnchecked { reason }
+                };
+            };
+            if proof.truncated {
+                return if config.require_certificate {
+                    CertifiedVerdict::BudgetExhausted {
+                        stage: "proof_logging",
+                    }
+                } else {
+                    CertifiedVerdict::UnsatUnchecked {
+                        reason: "DRAT proof step budget exceeded".to_string(),
+                    }
+                };
+            }
+
+            let drat_proof = proof.to_drat_text();
+            let drat_sha256 = sha256_hex(drat_proof.as_bytes());
+            match verify_drat_rup_proof(
+                &dimacs_cnf,
+                &assumption_lits,
+                &drat_proof,
+                config.checker_limits,
+            ) {
+                Ok(check_report) => {
+                    CertifiedVerdict::UnsatCertified(Box::new(RefutationCertificate {
+                        encoding_version: ENCODING_VERSION,
+                        solver_version: SOLVER_VERSION,
+                        checker_version: CHECKER_VERSION,
+                        tcb_scope: TCB_SCOPE_STATEMENT,
+                        assertions_debug: assertions.iter().map(|e| format!("{e:?}")).collect(),
+                        assumptions_debug: assumptions.iter().map(|e| format!("{e:?}")).collect(),
+                        num_vars,
+                        dimacs_cnf,
+                        cnf_sha256,
+                        assumption_lits,
+                        drat_proof,
+                        drat_sha256,
+                        conflict_budget: config.conflict_budget,
+                        proof_step_budget: config.proof_step_budget,
+                        check_report,
+                    }))
+                }
+                Err(error) => {
+                    if config.require_certificate {
+                        CertifiedVerdict::CertificateCheckFailed { error }
+                    } else {
+                        CertifiedVerdict::UnsatUnchecked {
+                            reason: error.to_string(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ── LBD / Glue tracking ─────────────────────────────────────────────────────
 //
@@ -199,6 +841,11 @@ pub struct SatSolver {
     /// Conflicts between restarts are `RESTART_UNIT` times the Luby
     /// sequence; `None` turns restarts off.
     restart_unit: Option<u64>,
+    /// Opt-in DRAT proof logger (disabled unless `enable_proof_logging` is called).
+    proof_log: Option<DratProof>,
+    proof_step_budget: Option<usize>,
+    /// Set if an unsupported / non-pure-CNF mechanism (e.g. a theory oracle) ran.
+    proof_tainted: Option<String>,
 }
 
 /// Conflicts per Luby unit. MiniSat's default.
@@ -249,7 +896,41 @@ impl SatSolver {
             gc_threshold: 100,
             conflict_budget: None,
             restart_unit: Some(RESTART_UNIT),
+            proof_log: None,
+            proof_step_budget: None,
+            proof_tainted: None,
         }
+    }
+
+    /// Enable opt-in DRAT proof recording with an optional maximum number of recorded steps.
+    pub fn enable_proof_logging(&mut self, step_budget: Option<usize>) {
+        self.proof_log = Some(DratProof::default());
+        self.proof_step_budget = step_budget;
+        self.proof_tainted = None;
+    }
+
+    pub fn proof(&self) -> Option<&DratProof> {
+        self.proof_log.as_ref()
+    }
+
+    pub fn proof_tainted_reason(&self) -> Option<&str> {
+        self.proof_tainted.as_deref()
+    }
+
+    fn record_proof_step(&mut self, step: DratStep) {
+        let Some(log) = self.proof_log.as_mut() else {
+            return;
+        };
+        if log.truncated {
+            return;
+        }
+        if let Some(budget) = self.proof_step_budget {
+            if log.steps.len() >= budget {
+                log.truncated = true;
+                return;
+            }
+        }
+        log.steps.push(step);
     }
 
     /// Ensure internal structures are large enough for the given variable.
@@ -333,6 +1014,7 @@ impl SatSolver {
         let accepted = self.add_clause_inner(lits);
         if !accepted && self.decision_level() == 0 {
             self.ok = false;
+            self.record_proof_step(DratStep::Add(vec![]));
         }
         accepted
     }
@@ -647,6 +1329,9 @@ impl SatSolver {
                 index_map[i] = Some(new_clauses.len());
                 new_clauses.push(self.clauses[i].clone());
                 new_meta.push(self.clause_meta[i].clone());
+            } else {
+                let evicted_clause = self.clauses[i].0.clone();
+                self.record_proof_step(DratStep::Delete(evicted_clause));
             }
         }
 
@@ -740,11 +1425,13 @@ impl SatSolver {
         self.cancel_until(0);
         if self.propagate().is_some() {
             self.ok = false;
+            self.record_proof_step(DratStep::Add(vec![]));
             return false;
         }
         for &lit in assumptions {
             self.trail_lim.push(self.trail.len());
             if !self.enqueue(lit, None) || self.propagate().is_some() {
+                self.record_proof_step(DratStep::Add(vec![]));
                 return false;
             }
         }
@@ -808,6 +1495,11 @@ impl SatSolver {
         if !self.ok {
             return Some(false);
         }
+        if theory.is_some() && self.proof_log.is_some() {
+            self.proof_tainted = Some(
+                "theory solver / memory oracle is outside pure-CNF RUP proof scope".to_string(),
+            );
+        }
         if !self.restore_assumptions(assumptions) {
             return Some(false);
         }
@@ -855,6 +1547,7 @@ impl SatSolver {
             if let Some(confl) = confl_opt {
                 // Conflict
                 if self.decision_level() <= assumptions.len() as u32 {
+                    self.record_proof_step(DratStep::Add(vec![]));
                     return Some(false); // Root or assumption level conflict -> UNSAT
                 }
                 conflicts += 1;
@@ -877,9 +1570,11 @@ impl SatSolver {
                 //   `learned_clause[1..]`, so clamping `backtrack_level` to `assumptions.len()`
                 //   keeps the clause conditional on those assumptions instead of aborting early.
                 if learned_clause.len() == 1 {
+                    self.record_proof_step(DratStep::Add(learned_clause.clone()));
                     self.cancel_until(0);
                     if !self.enqueue(learned_clause[0], None) || self.propagate().is_some() {
                         self.ok = false;
+                        self.record_proof_step(DratStep::Add(vec![]));
                         return Some(false);
                     }
                     if !assumptions.is_empty() && !self.restore_assumptions(assumptions) {
@@ -909,6 +1604,7 @@ impl SatSolver {
                     let c_idx = self.clauses.len();
                     let mut final_clause = learned_clause.clone();
                     final_clause.swap(1, max_i);
+                    self.record_proof_step(DratStep::Add(final_clause.clone()));
 
                     let lit0 = final_clause[0];
                     let lit1 = final_clause[1];
@@ -930,6 +1626,7 @@ impl SatSolver {
 
                     // BCP will flip the asserting literal.
                     if !self.enqueue(lit0, Some(c_idx)) {
+                        self.record_proof_step(DratStep::Add(vec![]));
                         return Some(false);
                     }
                 }
