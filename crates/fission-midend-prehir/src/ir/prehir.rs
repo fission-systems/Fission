@@ -181,6 +181,27 @@ pub enum PreHirBinaryOp {
     SGe,
 }
 
+impl PreHirBinaryOp {
+    /// Whether the result depends on more than the low bits of its operands.
+    ///
+    /// `+ - * & | ^ <<` are modular: the low N bits of the result are a
+    /// function of the low N bits of the operands alone, so narrowing or
+    /// re-signing an operand view does not change them. Every other operator
+    /// reads the operand's numeric domain -- its signedness (`/`, `%`, `<`)
+    /// or the bits above the result width (`>>`, `==`, `&&`).
+    ///
+    /// Lowering already folds p-code's `INT_DIV`/`INT_SDIV` (and `INT_REM`/
+    /// `INT_SREM`) into one `Div` (`Mod`) whose domain lives only in the
+    /// operand casts, so for these operators the operand width and signedness
+    /// are part of the operation's meaning: a rewrite may not retype them.
+    pub const fn reads_operand_domain(self) -> bool {
+        !matches!(
+            self,
+            Self::Add | Self::Sub | Self::Mul | Self::And | Self::Or | Self::Xor | Self::Shl
+        )
+    }
+}
+
 // Provenance must not change folding, CSE, diagnostic keys or expression identity.
 impl PartialEq for PreHirExpr {
     fn eq(&self, other: &Self) -> bool {
