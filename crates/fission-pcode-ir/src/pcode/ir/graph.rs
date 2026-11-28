@@ -11,6 +11,7 @@ use std::fmt::Write;
 #[path = "../graph_tests.rs"]
 mod tests;
 
+/// Graphviz DOT exporter for P-code functions.
 pub struct PcodeGraph;
 
 impl PcodeGraph {
