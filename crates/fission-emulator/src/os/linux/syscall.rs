@@ -635,15 +635,21 @@ pub(crate) fn execute_mmap(
     }
 
     let map_type = req.flags & MAP_TYPE_MASK;
+    let map_anon = (req.flags & MAP_ANONYMOUS) != 0;
+    // `MAP_SHARED_VALIDATE` asks for unknown-flag validation before anything
+    // else, whichever memory type follows.
+    if map_type == MAP_SHARED_VALIDATE && (req.flags & !SUPPORTED_PRIVATE_FLAGS) != 0 {
+        return Err(MmapError::InvalidArgument);
+    }
     match map_type {
         MAP_PRIVATE => {}
-        MAP_SHARED => return Err(MmapError::Unsupported),
-        MAP_SHARED_VALIDATE => {
-            if (req.flags & !SUPPORTED_PRIVATE_FLAGS) != 0 {
-                return Err(MmapError::InvalidArgument);
-            }
-            return Err(MmapError::Unsupported);
-        }
+        // Shared anonymous pages have no second mapper to share with in a
+        // single-process model, so modeling them as private anonymous pages
+        // preserves the bytes the guest observes. File-backed MAP_SHARED does
+        // change semantics (writes must reach the file and other mappers), so
+        // it stays an explicit refusal instead of a silently wrong mapping.
+        MAP_SHARED | MAP_SHARED_VALIDATE if map_anon => {}
+        MAP_SHARED | MAP_SHARED_VALIDATE => return Err(MmapError::Unsupported),
         _ => return Err(MmapError::InvalidArgument),
     }
 
@@ -651,9 +657,11 @@ pub(crate) fn execute_mmap(
         return Err(MmapError::Unsupported);
     }
 
-    let map_fixed_noreplace = (req.flags & MAP_FIXED_NOREPLACE) != 0;
-    let map_fixed = (req.flags & MAP_FIXED) != 0 || map_fixed_noreplace;
-    let map_anon = (req.flags & MAP_ANONYMOUS) != 0;
+    let map_fixed = (req.flags & MAP_FIXED) != 0;
+    // `MAP_FIXED_NOREPLACE` without `MAP_FIXED` keeps `addr` as a hint, so
+    // `addr == 0` means "anywhere" rather than an invalid fixed address.
+    let map_fixed_noreplace = !map_fixed && (req.flags & MAP_FIXED_NOREPLACE) != 0;
+    let noreplace_at_hint = map_fixed_noreplace && req.addr == 0;
 
     let max_addr = emu.state.page_map.max_address();
     if req.length > max_addr {
@@ -669,7 +677,10 @@ pub(crate) fn execute_mmap(
     if map_fixed && (req.addr == 0 || req.addr % PAGE_SIZE != 0) {
         return Err(MmapError::InvalidArgument);
     }
-    if map_fixed
+    if map_fixed_noreplace && !noreplace_at_hint && req.addr % PAGE_SIZE != 0 {
+        return Err(MmapError::InvalidArgument);
+    }
+    if (map_fixed || (map_fixed_noreplace && !noreplace_at_hint))
         && req
             .addr
             .checked_add(aligned_len)
@@ -718,8 +729,17 @@ pub(crate) fn execute_mmap(
     };
 
     let page_prot = ((req.prot as u8) & 0x07) | prot::VALID;
-    let saved_layout = emu.state.page_map.snapshot_layout();
-    let placed = if map_fixed_noreplace {
+    // Only a file-backed copy can fail after placement, so only that path needs
+    // a layout snapshot. Cloning every mapping on every anonymous mmap made a
+    // program with many mappings quadratic.
+    let saved_layout = staged_bytes
+        .as_ref()
+        .map(|_| emu.state.page_map.snapshot_layout());
+    let placed = if noreplace_at_hint {
+        emu.state
+            .page_map
+            .try_map_hint_or_any(0, aligned_len, page_prot, map_anon)
+    } else if map_fixed_noreplace {
         emu.state
             .page_map
             .try_map_fixed_noreplace(req.addr, aligned_len, page_prot, map_anon)
@@ -745,7 +765,9 @@ pub(crate) fn execute_mmap(
         && !data.is_empty()
         && emu.state.write_ram_unprotected(base, &data).is_err()
     {
-        emu.state.page_map.restore_layout(saved_layout);
+        if let Some(saved_layout) = saved_layout {
+            emu.state.page_map.restore_layout(saved_layout);
+        }
         return Err(MmapError::NoMemory);
     }
 

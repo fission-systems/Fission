@@ -241,6 +241,7 @@ fn invalid_fd_access_offsets_and_flags_return_typed_errors_without_mutating_stat
         ),
         -EINVAL
     );
+
     assert_eq!(
         call_sys_mmap(
             &env,
@@ -268,35 +269,10 @@ fn invalid_fd_access_offsets_and_flags_return_typed_errors_without_mutating_stat
         -EINVAL
     );
 
-    // 6. Unmodeled MAP_SHARED / MAP_SHARED_VALIDATE / MAP_HUGETLB -> explicit -EOPNOTSUPP.
+    // 6. File-backed MAP_SHARED changes write-back semantics and stays an
+    //    explicit refusal.
     assert_eq!(
         call_sys_mmap(&env, &mut emu, 0, 0x1000, PROT_READ, MAP_SHARED, rw_fd, 0),
-        -EOPNOTSUPP
-    );
-    assert_eq!(
-        call_sys_mmap(
-            &env,
-            &mut emu,
-            0,
-            0x1000,
-            PROT_READ,
-            MAP_SHARED | MAP_ANONYMOUS,
-            u64::MAX,
-            0,
-        ),
-        -EOPNOTSUPP
-    );
-    assert_eq!(
-        call_sys_mmap(
-            &env,
-            &mut emu,
-            0,
-            0x1000,
-            PROT_READ,
-            MAP_SHARED_VALIDATE | MAP_ANONYMOUS,
-            u64::MAX,
-            0,
-        ),
         -EOPNOTSUPP
     );
     assert_eq!(
@@ -315,6 +291,54 @@ fn invalid_fd_access_offsets_and_flags_return_typed_errors_without_mutating_stat
 
     // None of the rejected requests modified existing mappings.
     assert_eq!(emu.state.page_map.mappings(), before_mappings.as_slice());
+
+    // Shared *anonymous* memory has no second mapper in a single-process
+    // model, so it is modeled as private anonymous pages and must succeed.
+    let shared_anon = call_sys_mmap(
+        &env,
+        &mut emu,
+        0,
+        0x1000,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED | MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    assert!(
+        shared_anon > 0,
+        "shared anonymous mmap must succeed, got {shared_anon}"
+    );
+    let shared_validate = call_sys_mmap(
+        &env,
+        &mut emu,
+        0,
+        0x1000,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED_VALIDATE | MAP_ANONYMOUS,
+        u64::MAX,
+        0,
+    );
+    assert!(
+        shared_validate > 0,
+        "shared-validate anonymous mmap must succeed, got {shared_validate}"
+    );
+
+    // Without MAP_FIXED, `MAP_FIXED_NOREPLACE` keeps `addr` as a hint, so a
+    // null address means "anywhere" and the mapping must succeed.
+    let noreplace_hint = call_sys_mmap(
+        &env,
+        &mut emu,
+        0,
+        0x1000,
+        PROT_READ,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+        u64::MAX,
+        0,
+    );
+    assert!(
+        noreplace_hint > 0,
+        "MAP_FIXED_NOREPLACE with a null hint must succeed, got {noreplace_hint}"
+    );
 }
 
 #[test]
