@@ -11,21 +11,36 @@ mod signatures;
 
 use crate::loader::LoadedBinary;
 
-/// Helper function to search for byte pattern in data.
-/// Uses sliding window search which is efficient for small patterns.
+/// Find the byte offset of the first occurrence of `needle` in `haystack`.
 ///
 /// Performance: O(n*m) worst case, but typically much faster for short patterns.
 #[inline]
-fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
-        return true;
+        return Some(0);
     }
     if needle.len() > haystack.len() {
-        return false;
+        return None;
     }
     haystack
         .windows(needle.len())
-        .any(|window| window == needle)
+        .position(|window| window == needle)
+}
+
+/// Helper function to search for byte pattern in data.
+#[inline]
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    find_bytes(haystack, needle).is_some()
+}
+
+/// Return the greatest valid UTF-8 char boundary in `s` that is `<= max_bytes`.
+#[inline]
+fn floor_char_boundary(s: &str, max_bytes: usize) -> usize {
+    let mut idx = max_bytes.min(s.len());
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
 }
 
 /// Detection confidence level
@@ -513,11 +528,15 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
         ));
     }
 
-    // GCC detection - need string conversion only if found
-    if contains_bytes(data, b"GCC:") {
-        // Only allocate string for version extraction if GCC pattern found
-        let data_str = String::from_utf8_lossy(data);
-        let version = extract_gcc_version(&data_str);
+    // GCC detection - convert only the bounded snippet around `GCC:` to UTF-8
+    if let Some(pos) = find_bytes(data, b"GCC:") {
+        let tail = &data[pos..];
+        let end = tail
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or_else(|| 50.min(tail.len()));
+        let snippet = String::from_utf8_lossy(&tail[..end]);
+        let version = extract_gcc_version(&snippet);
         result.add(Detection::new(
             DetectionType::Compiler,
             "GCC",
@@ -552,13 +571,14 @@ fn extract_gcc_version(data: &str) -> Option<String> {
     if let Some(pos) = data.find("GCC:") {
         let rest = &data[pos..];
         // Look for version pattern like "GCC: (GNU) 10.2.0"
-        if let Some(end) = rest.find('\0').or(Some(50.min(rest.len()))) {
-            let snippet = &rest[..end];
-            // Extract version number
-            for word in snippet.split_whitespace() {
-                if word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-                    return Some(word.to_string());
-                }
+        let end = rest
+            .find('\0')
+            .unwrap_or_else(|| floor_char_boundary(rest, 50));
+        let snippet = &rest[..end];
+        // Extract version number
+        for word in snippet.split_whitespace() {
+            if word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                return Some(word.to_string());
             }
         }
     }
@@ -662,5 +682,50 @@ mod tests {
         let mask = [0xFF, 0xFF, 0x00]; // Ignore third byte
         let bytes2 = [0x55, 0x8B, 0xFF, 0x83];
         assert!(matches_signature(&bytes2, &sig, Some(&mask)));
+    }
+
+    #[test]
+    fn extract_gcc_version_handles_multibyte_char_straddling_50_byte_cap() {
+        // 2-byte char 'é' (bytes 49..51) straddling index 50
+        let mut s2 = String::from("GCC: ");
+        s2.push_str(&"a".repeat(44));
+        s2.push('é');
+        s2.push_str(" tail");
+        assert_eq!(s2.len(), 5 + 44 + 2 + 5);
+        assert_eq!(extract_gcc_version(&s2), None);
+
+        // 3-byte char '\u{FFFD}' at bytes 48..51 and 49..52 (exact CI panic alignments)
+        for pad in [43usize, 44usize] {
+            let mut s3 = String::from("GCC: ");
+            s3.push_str(&"x".repeat(pad));
+            s3.push('\u{FFFD}');
+            s3.push_str(" 12.1");
+            assert_eq!(extract_gcc_version(&s3), None);
+        }
+
+        // 4-byte char '🦀' straddling index 50 (bytes 47..51, 48..52, 49..53)
+        for pad in [42usize, 43usize, 44usize] {
+            let mut s4 = String::from("GCC: ");
+            s4.push_str(&"b".repeat(pad));
+            s4.push('🦀');
+            assert_eq!(extract_gcc_version(&s4), None);
+        }
+    }
+
+    #[test]
+    fn extract_gcc_version_preserves_valid_versions() {
+        assert_eq!(
+            extract_gcc_version("GCC: (GNU) 10.2.0\0"),
+            Some("10.2.0".to_string())
+        );
+        assert_eq!(
+            extract_gcc_version("GCC: (Ubuntu 11.4.0-1ubuntu1~22.04.2) 11.4.0\0"),
+            Some("11.4.0-1ubuntu1~22.04.2)".to_string())
+        );
+        assert_eq!(
+            extract_gcc_version("GCC: (GNU) 13.2.0"),
+            Some("13.2.0".to_string())
+        );
+        assert_eq!(extract_gcc_version("GCC: no-version"), None);
     }
 }
