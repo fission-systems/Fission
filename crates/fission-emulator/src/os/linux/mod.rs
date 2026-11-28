@@ -463,16 +463,22 @@ impl OsEnvironment for LinuxEnv {
                         ));
                         emu.notify_syscall_complete(event_id, task_id, &outcome);
                     }
-                    Ok(HleResult::Schedule) => {
-                        if sys_num == 24 {
-                            // sched_yield completes immediately from the caller's viewpoint.
+                    Ok(HleResult::Schedule) => match spec.map(|spec| spec.name) {
+                        // sched_yield completes immediately from the caller's
+                        // viewpoint. Matched by name so the mapping does not
+                        // duplicate the canonical numbering.
+                        Some("sched_yield") => {
                             let outcome = crate::observe::CallOutcome::succeeded_guest(Some(0));
                             emu.notify_syscall_complete(event_id, task_id, &outcome);
-                        } else if sys_num == 60 {
+                        }
+                        // Thread exit: the caller never resumes, so there is no
+                        // return value to report.
+                        Some("exit" | "exit_group") => {
                             let code = (args[0] as u32) & 0xff;
                             let outcome = crate::observe::CallOutcome::halted(code);
                             emu.notify_syscall_complete(event_id, task_id, &outcome);
-                        } else if emu.current_tid == task_id {
+                        }
+                        _ if emu.current_tid == task_id => {
                             let ret = emu.read_register_u64(abi.result).ok();
                             let outcome = match ret
                                 .and_then(|r| decode_linux_syscall_errno(r, emu.arch.pointer_size))
@@ -483,14 +489,15 @@ impl OsEnvironment for LinuxEnv {
                                 None => crate::observe::CallOutcome::resumed_guest(ret),
                             };
                             emu.notify_syscall_complete(event_id, task_id, &outcome);
-                        } else {
+                        }
+                        _ => {
                             let outcome = crate::observe::CallOutcome::blocked(Some(
                                 "guest task blocked waiting in scheduler".into(),
                             ));
                             emu.notify_syscall_complete(event_id, task_id, &outcome);
                             emu.track_blocked_syscall(task_id, event_id);
                         }
-                    }
+                    },
                     Ok(HleResult::Continue | HleResult::JumpTo(_)) => {
                         let ret = emu.read_register_u64(abi.result).ok();
                         let outcome = match ret

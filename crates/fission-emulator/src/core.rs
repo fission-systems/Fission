@@ -1722,12 +1722,12 @@ impl Emulator {
             0
         };
 
-        let hle_misses_before = self.metrics.hle_miss_total();
+        let hle_misses_before = self.metrics.hle_miss_count(func_name);
         let os_ref = Arc::clone(&self.os);
         let result = os_ref.dispatch_hle(self, func_name);
 
         if observe_hle && event_id != 0 {
-            let hle_missed = self.metrics.hle_miss_total() > hle_misses_before;
+            let hle_missed = self.metrics.hle_miss_count(func_name) > hle_misses_before;
             let ret = self.read_return_val_best_effort();
             let outcome = match &result {
                 Err(err) => crate::observe::CallOutcome::error(

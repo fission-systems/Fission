@@ -106,6 +106,15 @@ impl EmulatorMetrics {
         self.hle_misses.values().sum()
     }
 
+    /// Misses recorded for one stub name.
+    ///
+    /// A nested dispatch can record a miss while an outer stub is still
+    /// running, so correlating an attempt with the *global* total attributes
+    /// the inner miss to the outer stub. Compare this name's count instead.
+    pub fn hle_miss_count(&self, name: &str) -> u64 {
+        self.hle_misses.get(name).copied().unwrap_or(0)
+    }
+
     pub fn unknown_syscall_total(&self) -> u64 {
         self.unknown_syscalls.values().sum()
     }
