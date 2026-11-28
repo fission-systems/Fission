@@ -106,6 +106,15 @@ impl EmulatorMetrics {
         self.hle_misses.values().sum()
     }
 
+    /// Misses recorded for one stub name.
+    ///
+    /// A nested dispatch can record a miss while an outer stub is still
+    /// running, so correlating an attempt with the *global* total attributes
+    /// the inner miss to the outer stub. Compare this name's count instead.
+    pub fn hle_miss_count(&self, name: &str) -> u64 {
+        self.hle_misses.get(name).copied().unwrap_or(0)
+    }
+
     pub fn unknown_syscall_total(&self) -> u64 {
         self.unknown_syscalls.values().sum()
     }
@@ -312,29 +321,54 @@ pub struct BudgetReport {
 /// Use `u64::MAX` / large kinds to disable a sub-gate.
 pub type QualityBudget = (u64, usize, u64, u64);
 
-/// One thing the run did to the outside world.
+/// One thing the run attempted in modeled guest state.
 ///
-/// Both a rendered line and the pieces it was rendered from: the line is what
-/// a person reads, the fields are what a tool matches on.
+/// Both a rendered compatibility line and structured metadata: the line is what
+/// a person reads quickly, while the fields distinguish raw/canonical IDs,
+/// bounded entry arguments, task identity, modeled-guest vs zero effect scope,
+/// and correlated completion outcome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BehaviorEventReport {
+    #[serde(default)]
+    pub event_id: u64,
+    #[serde(default)]
+    pub task_id: u64,
     pub pc: u64,
     /// `"syscall"` or `"hle"`.
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_abi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_args: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<crate::observe::SyscallArg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<crate::observe::CallOutcome>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub completion_omitted: bool,
     pub line: String,
 }
 
-/// What the run did, and how much of the binary it touched.
+/// What the run attempted, and how much of the binary it touched.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BehaviorReport {
     pub events: Vec<BehaviorEventReport>,
-    /// Events past the log's cap. Non-zero means `events` is a prefix.
+    /// Attempt events past the log's cap. Non-zero means `events` is a prefix.
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub dropped: u64,
+    /// Completion outcomes omitted because their attempt was dropped or absent.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub dropped_completions: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arg_policy: Option<crate::observe::BehaviorArgPolicy>,
     /// Present only when coverage was asked for -- it costs a call per block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage: Option<CoverageReport>,
@@ -389,6 +423,10 @@ pub struct CoverageReport {
 
 fn is_zero_u64(v: &u64) -> bool {
     *v == 0
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Exact captured guest console bytes. Kept separate from host diagnostics and
@@ -622,19 +660,54 @@ impl SandboxMetricsReport {
                 let line = e.render();
                 match e {
                     BehaviorEvent::Syscall {
-                        pc, number, name, ..
+                        event_id,
+                        task_id,
+                        pc,
+                        guest_abi,
+                        raw_number,
+                        canonical_number,
+                        number,
+                        name,
+                        args,
+                        detail,
+                        outcome,
                     } => BehaviorEventReport {
+                        event_id: *event_id,
+                        task_id: *task_id,
                         pc: *pc,
                         kind: "syscall".into(),
+                        guest_abi: guest_abi.map(str::to_string),
+                        raw_number: Some(*raw_number),
+                        canonical_number: *canonical_number,
                         number: Some(*number),
                         name: name.map(|n| n.to_string()),
+                        raw_args: args.to_vec(),
+                        args: detail.clone(),
+                        outcome: outcome.clone(),
+                        completion_omitted: outcome.is_none(),
                         line,
                     },
-                    BehaviorEvent::Hle { pc, name } => BehaviorEventReport {
+                    BehaviorEvent::Hle {
+                        event_id,
+                        task_id,
+                        pc,
+                        name,
+                        args,
+                        outcome,
+                    } => BehaviorEventReport {
+                        event_id: *event_id,
+                        task_id: *task_id,
                         pc: *pc,
                         kind: "hle".into(),
+                        guest_abi: None,
+                        raw_number: None,
+                        canonical_number: None,
                         number: None,
                         name: Some(name.clone()),
+                        raw_args: args.to_vec(),
+                        args: Vec::new(),
+                        outcome: outcome.clone(),
+                        completion_omitted: outcome.is_none(),
                         line,
                     },
                 }
@@ -643,6 +716,8 @@ impl SandboxMetricsReport {
         self.behavior = Some(BehaviorReport {
             events,
             dropped: log.dropped,
+            dropped_completions: log.dropped_completions,
+            arg_policy: Some(log.arg_policy()),
             coverage: coverage.map(|c| CoverageReport {
                 blocks_executed: c.blocks.len(),
                 instructions_executed: c.executed_instructions().len(),

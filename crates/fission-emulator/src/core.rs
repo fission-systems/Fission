@@ -305,6 +305,11 @@ pub struct Emulator {
     pub(crate) insn_checkpoint: Vec<(u64, u32, [u8; 8], [Option<u32>; 8])>,
     /// Execution deadline, after which run loops halt with `RunOutcome::Interrupted`.
     pub deadline: Option<std::time::Instant>,
+    /// Monotonic event ID generator for behavior attempt/completion correlation.
+    pub(crate) next_behavior_event_id: u64,
+    /// Blocked syscall attempt IDs keyed by guest task ID so resumption can
+    /// correlate completion status back to the original attempt.
+    pub(crate) blocked_syscall_events: BTreeMap<u64, u64>,
 }
 
 /// Max guest instructions per translation block.
@@ -558,6 +563,8 @@ impl Emulator {
             exit_signal: None,
             insn_checkpoint: Vec::new(),
             deadline: None,
+            next_behavior_event_id: 1,
+            blocked_syscall_events: BTreeMap::new(),
         };
 
         // Default SP if no OS image applies one (bare metal): the top of the
@@ -1590,23 +1597,159 @@ impl Emulator {
         }
     }
 
-    pub(crate) fn notify_syscall_detailed(
-        &mut self,
-        pc: u64,
-        number: u64,
-        name: Option<&'static str>,
-        args: &[u64; 6],
-        detail: Vec<crate::observe::SyscallArg>,
-    ) {
-        for o in &mut self.observers {
-            o.on_syscall_detailed(pc, number, name, args, detail.clone());
+    pub(crate) fn next_behavior_event_id(&mut self) -> u64 {
+        let id = self.next_behavior_event_id.max(1);
+        self.next_behavior_event_id = id.wrapping_add(1).max(1);
+        id
+    }
+
+    pub(crate) fn track_blocked_syscall(&mut self, task_id: u64, event_id: u64) {
+        if event_id != 0 {
+            self.blocked_syscall_events.insert(task_id, event_id);
         }
     }
 
-    pub(crate) fn notify_hle(&mut self, pc: u64, name: &str) {
-        for o in &mut self.observers {
-            o.on_hle(pc, name);
+    pub(crate) fn flush_resumed_blocked_syscall(&mut self) {
+        let task_id = self.current_tid;
+        let Some(event_id) = self.blocked_syscall_events.remove(&task_id) else {
+            return;
+        };
+        if self.observers.is_empty() {
+            return;
         }
+        let abi = crate::os::linux::syscall_conv::SyscallAbi::for_arch(&self.arch);
+        let ret = self.read_register_u64(abi.result).ok();
+        let errno = ret.and_then(|value| {
+            crate::os::linux::decode_linux_syscall_errno(value, self.arch.pointer_size)
+        });
+        let outcome = match errno {
+            Some(err) => crate::observe::CallOutcome::error(
+                ret,
+                Some(err),
+                Some("interrupted or failed after blocking".into()),
+            ),
+            None => crate::observe::CallOutcome::resumed_guest(ret),
+        };
+        self.notify_syscall_complete(event_id, task_id, &outcome);
+    }
+
+    pub(crate) fn notify_syscall_attempt(&mut self, attempt: &crate::observe::SyscallAttempt) {
+        for o in &mut self.observers {
+            o.on_syscall_attempt(attempt);
+        }
+    }
+
+    pub(crate) fn notify_syscall_complete(
+        &mut self,
+        event_id: u64,
+        task_id: u64,
+        outcome: &crate::observe::CallOutcome,
+    ) {
+        for o in &mut self.observers {
+            o.on_syscall_complete(event_id, task_id, outcome);
+        }
+    }
+
+    pub(crate) fn notify_hle_attempt(&mut self, attempt: &crate::observe::HleAttempt) {
+        for o in &mut self.observers {
+            o.on_hle_attempt(attempt);
+        }
+    }
+
+    pub(crate) fn notify_hle_complete(
+        &mut self,
+        event_id: u64,
+        task_id: u64,
+        outcome: &crate::observe::CallOutcome,
+    ) {
+        for o in &mut self.observers {
+            o.on_hle_complete(event_id, task_id, outcome);
+        }
+    }
+
+    /// Best-effort side-effect-free snapshot of up to 6 ABI entry arguments
+    /// for HLE dispatch observation (reads registers and readonly RAM slots).
+    pub(crate) fn read_hle_entry_args(&mut self) -> [u64; 6] {
+        let mut out = [0u64; 6];
+        let regs: Vec<&'static str> = self.arch.cc.arg_regs().to_vec();
+        let ptr_size = usize::from(self.arch.pointer_size).min(8);
+        let sp = self.read_register_u64(self.arch.sp_reg).unwrap_or(0);
+        let ram = self.state.ram_space();
+        for (idx, slot) in out.iter_mut().enumerate() {
+            if let Some(&reg) = regs.get(idx) {
+                *slot = self.read_register_u64(reg).unwrap_or(0);
+            } else if sp != 0 {
+                let offset = self.arch.cc.stack_arg_offset(idx - regs.len());
+                if let Ok(bytes) =
+                    self.state
+                        .read_space_readonly(ram, sp.wrapping_add(offset), ptr_size)
+                {
+                    *slot = crate::arch::calling_convention::le_bytes_to_u64(&bytes);
+                }
+            }
+        }
+        out
+    }
+
+    pub(crate) fn read_return_val_best_effort(&mut self) -> Option<u64> {
+        let reg = self.arch.cc.return_reg();
+        self.read_register_u64(reg).ok()
+    }
+
+    /// Dispatch one HLE stub while capturing entry attempt metadata and
+    /// correlating its completion outcome (`Succeeded` vs `HleMiss` vs `Error`
+    /// vs `Halted`/`Blocked`/`Deadlocked`).
+    pub(crate) fn dispatch_hle_observed(
+        &mut self,
+        magic_pc: u64,
+        func_name: &str,
+    ) -> Result<HleResult> {
+        let observe_hle = !self.observers.is_empty() && func_name != "syscall";
+        let task_id = self.current_tid;
+        let event_id = if observe_hle {
+            let id = self.next_behavior_event_id();
+            let args = self.read_hle_entry_args();
+            let attempt = crate::observe::HleAttempt {
+                event_id: id,
+                task_id,
+                pc: magic_pc,
+                name: func_name.to_string(),
+                args,
+            };
+            self.notify_hle_attempt(&attempt);
+            id
+        } else {
+            0
+        };
+
+        let hle_misses_before = self.metrics.hle_miss_count(func_name);
+        let os_ref = Arc::clone(&self.os);
+        let result = os_ref.dispatch_hle(self, func_name);
+
+        if observe_hle && event_id != 0 {
+            let hle_missed = self.metrics.hle_miss_count(func_name) > hle_misses_before;
+            let ret = self.read_return_val_best_effort();
+            let outcome = match &result {
+                Err(err) => crate::observe::CallOutcome::error(
+                    ret,
+                    None,
+                    Some(format!("HLE dispatch failed: {err}")),
+                ),
+                Ok(_) if hle_missed => crate::observe::CallOutcome::hle_miss(
+                    ret,
+                    format!("unimplemented HLE stub `{func_name}` returned synthetic fallback"),
+                ),
+                Ok(HleResult::Continue | HleResult::JumpTo(_)) => {
+                    crate::observe::CallOutcome::succeeded_guest(ret)
+                }
+                Ok(HleResult::Halt(code)) => crate::observe::CallOutcome::halted(*code),
+                Ok(HleResult::Schedule) => crate::observe::CallOutcome::blocked(None),
+                Ok(HleResult::Deadlock) => crate::observe::CallOutcome::deadlocked(None),
+            };
+            self.notify_hle_complete(event_id, task_id, &outcome);
+        }
+
+        result
     }
 
     pub fn with_max_inst(mut self, max: Option<u64>) -> Self {
@@ -3103,6 +3246,10 @@ impl Emulator {
                 }
             }
 
+            if !self.blocked_syscall_events.is_empty() {
+                self.flush_resumed_blocked_syscall();
+            }
+
             // ── HLE Trap Check (before fetch/compile — magic is not code) ────
             if self.pc >= self.magic_range.0 && self.pc < self.magic_range.1 {
                 let magic = self.pc;
@@ -3115,17 +3262,7 @@ impl Emulator {
                     pc: magic,
                     func_name: func_name.clone(),
                 });
-                if !self.observers.is_empty() {
-                    self.notify_hle(magic, &func_name);
-                }
-
-                let result = {
-                    // A clone of the handle, not a pointer into `self`: the
-                    // handler gets `&mut self` and may replace `self.os`, and
-                    // the layer whose method is running must outlive the call.
-                    let os_ref = Arc::clone(&self.os);
-                    os_ref.dispatch_hle(self, &func_name)?
-                };
+                let result = self.dispatch_hle_observed(magic, &func_name)?;
 
                 match result {
                     HleResult::Deadlock => {

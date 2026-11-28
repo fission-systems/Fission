@@ -89,6 +89,19 @@ impl SyscallAbi {
         }
     }
 
+    /// Canonical ABI name matching the register/number table selected by [`Self::for_arch`].
+    pub fn abi_name(&self) -> &'static str {
+        if self.number == X86_32.number {
+            "linux_i386"
+        } else if self.number == AARCH64.number {
+            "linux_aarch64"
+        } else if self.number == ARM32.number {
+            "linux_arm32"
+        } else {
+            "linux_x86_64"
+        }
+    }
+
     /// This number, in the numbering the syscall registry is keyed on.
     pub fn canonical_number(&self, number: u64) -> Option<u64> {
         if self.number == X86_32.number {
