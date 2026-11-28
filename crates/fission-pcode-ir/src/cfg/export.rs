@@ -7,21 +7,29 @@ use serde::{Deserialize, Serialize};
 /// Directed CFG edge keyed by basic-block start addresses.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AddressEdge {
+    /// Source block start address of the edge.
     pub from: u64,
+    /// Destination block start address of the edge.
     pub to: u64,
 }
 
 /// Canonical CFG snapshot used by parity harnesses and checked-in fixtures.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AddressCfgSnapshot {
+    /// Name of the CFG construction model that produced this snapshot.
     pub model: String,
+    /// Address of the function's entry block.
     pub function_address: u64,
+    /// Start addresses of the function's basic blocks.
     pub block_starts: Vec<u64>,
+    /// Directed edges between basic blocks.
     pub edges: Vec<AddressEdge>,
+    /// Start addresses of blocks that exit the function.
     pub exit_blocks: Vec<u64>,
 }
 
 impl AddressCfgSnapshot {
+    /// Build a CFG snapshot from p-code using the basic-block successor rules.
     pub fn from_pcode_cfg_builder(func: &PcodeFunction) -> CfgResult<Self> {
         if func.blocks.is_empty() {
             return Err(CfgError::NoEntryPoint);
@@ -119,10 +127,12 @@ impl AddressCfgSnapshot {
         Ok(snapshot)
     }
 
+    /// Build a CFG snapshot from p-code using structuring successor edges.
     pub fn from_pcode_structuring(func: &PcodeFunction) -> Self {
         Self::from_structuring_edges("pcode_structuring", func)
     }
 
+    /// Sort and deduplicate the snapshot's block starts, edges, and exit blocks.
     pub fn canonicalize(&mut self) {
         self.block_starts.sort_unstable();
         self.block_starts.dedup();
