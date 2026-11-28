@@ -143,51 +143,52 @@ impl SimProcedure for Memset {
     }
 }
 
-/// libc `mmap` — same semantics as the mmap syscall HLE.
+/// libc `mmap` — delegates to the shared canonical Linux `mmap` implementation
+/// and translates errors to `MAP_FAILED` (`(void *)-1`).
 pub struct Mmap;
 impl SimProcedure for Mmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        use crate::pcode::page_map::prot;
+        use crate::os::linux::syscall::{MmapRequest, execute_mmap};
         // SysV: mmap(addr, length, prot, flags, fd, offset)
         let addr = emu.read_arg(0).unwrap_or(0);
         let length = emu.read_arg(1).unwrap_or(0);
-        let prot_bits = emu.read_arg(2).unwrap_or(0) as u8;
+        let prot = emu.read_arg(2).unwrap_or(0);
         let flags = emu.read_arg(3).unwrap_or(0);
         let fd = emu.read_arg(4).unwrap_or(u64::MAX) as i64;
-        let offset = emu.read_arg(5).unwrap_or(0) as usize;
-        let page_prot = (prot_bits & 0x07) | prot::VALID;
-        let map_fixed = flags & 0x10 != 0;
-        let map_anon = flags & 0x20 != 0;
+        let offset_bytes = emu.read_arg(5).unwrap_or(0);
 
-        // An empty length is EINVAL, which libc reports as MAP_FAILED.
-        let base = if length == 0 {
-            0
-        } else {
-            emu.state
-                .page_map
-                .mmap_with_hint(addr, length, page_prot, map_fixed)
-        };
-        if base == 0 {
-            // No free hole: libc's mmap returns MAP_FAILED.
-            tracing::warn!("SimProcedure: mmap(len={length}) -> MAP_FAILED");
-            emu.write_return_val(u64::MAX)?;
-            return Ok(HleResult::Continue);
-        }
-        crate::os::linux::syscall::fill_new_mapping(
-            emu,
-            base,
-            length,
-            (!map_anon && fd >= 0).then_some((fd as u64, offset)),
-        );
-        tracing::info!(
-            "SimProcedure: mmap(0x{:X}, {}, prot=0x{:X}, flags=0x{:X}) -> 0x{:X}",
+        let req = MmapRequest {
             addr,
             length,
-            page_prot,
+            prot,
             flags,
-            base
-        );
-        emu.write_return_val(base)?;
+            fd,
+            offset_bytes,
+        };
+        match execute_mmap(emu, req) {
+            Ok(base) => {
+                tracing::info!(
+                    "SimProcedure: mmap(0x{:X}, {}, prot=0x{:X}, flags=0x{:X}) -> 0x{:X}",
+                    addr,
+                    length,
+                    prot,
+                    flags,
+                    base
+                );
+                emu.write_return_val(base)?;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "SimProcedure: mmap(0x{:X}, {}, prot=0x{:X}, flags=0x{:X}, fd={}) -> MAP_FAILED ({err:?})",
+                    addr,
+                    length,
+                    prot,
+                    flags,
+                    fd
+                );
+                emu.write_return_val(u64::MAX)?;
+            }
+        }
         Ok(HleResult::Continue)
     }
 }

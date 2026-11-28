@@ -33,6 +33,36 @@ impl VfsError {
 
 type Result<T> = std::result::Result<T, VfsError>;
 
+/// Access mode granted when a guest descriptor is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VfsOpenAccess {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+}
+
+impl VfsOpenAccess {
+    /// Decode Linux `O_ACCMODE` (`flags & 0x3`) into a descriptor access mode.
+    #[must_use]
+    pub fn from_linux_open_flags(flags: u64) -> Self {
+        match flags & 0x3 {
+            1 => Self::WriteOnly,
+            2 => Self::ReadWrite,
+            _ => Self::ReadOnly,
+        }
+    }
+
+    #[must_use]
+    pub fn allows_read(self) -> bool {
+        matches!(self, Self::ReadOnly | Self::ReadWrite)
+    }
+
+    #[must_use]
+    pub fn allows_write(self) -> bool {
+        matches!(self, Self::WriteOnly | Self::ReadWrite)
+    }
+}
+
 /// Represents a single file inside the Virtual File System.
 #[derive(Clone, Debug)]
 pub struct SimFile {
@@ -40,6 +70,9 @@ pub struct SimFile {
     pub content: Vec<u8>,
     pub cursor: usize,
     pub eof: bool,
+    pub access: VfsOpenAccess,
+    /// Whether `mmap` may map this descriptor (`false` for stdio character streams).
+    pub mappable: bool,
     /// Optional host path for re-open / diagnostics.
     pub host_path: Option<PathBuf>,
 }
@@ -51,6 +84,8 @@ impl SimFile {
             content,
             cursor: 0,
             eof: false,
+            access: VfsOpenAccess::ReadWrite,
+            mappable: true,
             host_path: None,
         }
     }
@@ -139,9 +174,18 @@ pub struct SimVFS {
 impl SimVFS {
     pub fn new() -> Self {
         let mut files = HashMap::new();
-        files.insert(0, SimFile::new("stdin", Vec::new()));
-        files.insert(1, SimFile::new("stdout", Vec::new()));
-        files.insert(2, SimFile::new("stderr", Vec::new()));
+        let mut stdin = SimFile::new("stdin", Vec::new());
+        stdin.access = VfsOpenAccess::ReadOnly;
+        stdin.mappable = false;
+        let mut stdout = SimFile::new("stdout", Vec::new());
+        stdout.access = VfsOpenAccess::WriteOnly;
+        stdout.mappable = false;
+        let mut stderr = SimFile::new("stderr", Vec::new());
+        stderr.access = VfsOpenAccess::WriteOnly;
+        stderr.mappable = false;
+        files.insert(0, stdin);
+        files.insert(1, stdout);
+        files.insert(2, stderr);
         Self {
             files,
             next_fd: 3,
@@ -183,10 +227,16 @@ impl SimVFS {
 
     /// Open by name: seed → host alias → empty buffer.
     pub fn open(&mut self, name: &str, content: Vec<u8>) -> u64 {
+        self.open_with_access(name, content, VfsOpenAccess::ReadWrite)
+    }
+
+    /// Open by name with explicit descriptor access permissions.
+    pub fn open_with_access(&mut self, name: &str, content: Vec<u8>, access: VfsOpenAccess) -> u64 {
         let resolved = self.resolve_content(name, content);
         let fd = self.next_fd;
         self.next_fd += 1;
         let mut file = SimFile::new(name, resolved.0);
+        file.access = access;
         file.host_path = resolved.1;
         self.files.insert(fd, file);
         fd
@@ -284,6 +334,16 @@ impl SimVFS {
 
     pub fn file_size(&self, fd: u64) -> Option<usize> {
         self.files.get(&fd).map(|f| f.size())
+    }
+
+    pub fn file_access(&self, fd: u64) -> Result<VfsOpenAccess> {
+        let file = self.files.get(&fd).ok_or(VfsError::BadFd(fd))?;
+        Ok(file.access)
+    }
+
+    pub fn is_mappable(&self, fd: u64) -> Result<bool> {
+        let file = self.files.get(&fd).ok_or(VfsError::BadFd(fd))?;
+        Ok(file.mappable)
     }
 
     /// The bytes an open FD holds in `[offset, offset + len)`, without moving

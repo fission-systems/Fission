@@ -58,6 +58,24 @@ pub fn guest_addr_span(addr: u64, is_64bit: bool) -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
+/// Error returned by checked `PageMap` placement primitives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MmapPlacementError {
+    InvalidRange,
+    Exists,
+    NoMemory,
+}
+
+#[inline]
+fn checked_aligned_len(len: u64, max_address: u64) -> Option<u64> {
+    if len == 0 || len > max_address {
+        return None;
+    }
+    let end = len.checked_add(PAGE_SIZE - 1)?;
+    let aligned = end & PAGE_MASK;
+    (aligned > 0 && aligned <= max_address).then_some(aligned)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccessKind {
     Read,
@@ -88,7 +106,7 @@ pub enum PageFault {
 }
 
 /// A contiguous guest mapping.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuestMapping {
     pub start: u64,
     /// Exclusive end address (page-aligned).
@@ -473,6 +491,160 @@ impl PageMap {
         gaps
     }
 
+    /// Snapshot the mapping vector and `mmap_hint` so a failed backing copy can
+    /// atomically roll back placement without disturbing prior mappings.
+    #[must_use]
+    pub fn snapshot_layout(&self) -> (Vec<GuestMapping>, u64) {
+        (self.mappings.clone(), self.mmap_hint)
+    }
+
+    /// Restore a previously snapshotted mapping layout and hint.
+    pub fn restore_layout(&mut self, saved: (Vec<GuestMapping>, u64)) {
+        self.mappings = saved.0;
+        self.mmap_hint = saved.1;
+    }
+
+    /// Atomically place a fixed non-replacing mapping (`MAP_FIXED_NOREPLACE`),
+    /// returning `Err(MmapPlacementError::Exists)` without mutating existing
+    /// mappings or `mmap_hint` when any page overlaps.
+    pub fn try_map_fixed_noreplace(
+        &mut self,
+        addr: u64,
+        len: u64,
+        page_prot: u8,
+        anon: bool,
+    ) -> Result<u64, MmapPlacementError> {
+        if addr == 0 || addr % PAGE_SIZE != 0 {
+            return Err(MmapPlacementError::InvalidRange);
+        }
+        let max_addr = self.max_address();
+        let aligned_len = checked_aligned_len(len, max_addr).ok_or(MmapPlacementError::NoMemory)?;
+        let Some(end) = addr.checked_add(aligned_len) else {
+            return Err(MmapPlacementError::NoMemory);
+        };
+        if end > max_addr {
+            return Err(MmapPlacementError::NoMemory);
+        }
+        if !self.overlapping(addr, end).is_empty() {
+            return Err(MmapPlacementError::Exists);
+        }
+        self.map_region(addr, aligned_len, page_prot, anon);
+        Ok(addr)
+    }
+
+    /// Place a fixed replacing mapping (`MAP_FIXED`), checking address
+    /// alignment and guest bounds before mutating `PageMap`.
+    pub fn try_map_fixed_replace(
+        &mut self,
+        addr: u64,
+        len: u64,
+        page_prot: u8,
+        anon: bool,
+    ) -> Result<u64, MmapPlacementError> {
+        if addr == 0 || addr % PAGE_SIZE != 0 {
+            return Err(MmapPlacementError::InvalidRange);
+        }
+        let max_addr = self.max_address();
+        let aligned_len = checked_aligned_len(len, max_addr).ok_or(MmapPlacementError::NoMemory)?;
+        let Some(end) = addr.checked_add(aligned_len) else {
+            return Err(MmapPlacementError::NoMemory);
+        };
+        if end > max_addr {
+            return Err(MmapPlacementError::NoMemory);
+        }
+        self.map_region(addr, aligned_len, page_prot, anon);
+        Ok(addr)
+    }
+
+    /// Place a non-fixed mapping using `hint` if non-zero and free, or the
+    /// next free hole otherwise, preserving `anon` accurately.
+    pub fn try_map_hint_or_any(
+        &mut self,
+        hint: u64,
+        len: u64,
+        page_prot: u8,
+        anon: bool,
+    ) -> Result<u64, MmapPlacementError> {
+        let max_addr = self.max_address();
+        let aligned_len = checked_aligned_len(len, max_addr).ok_or(MmapPlacementError::NoMemory)?;
+        if hint != 0 {
+            let aligned_hint = page_align_down(hint);
+            if aligned_hint >= PAGE_SIZE
+                && aligned_hint
+                    .checked_add(aligned_len)
+                    .is_some_and(|end| end <= max_addr)
+                && self
+                    .overlapping(aligned_hint, aligned_hint + aligned_len)
+                    .is_empty()
+            {
+                self.map_region(aligned_hint, aligned_len, page_prot, anon);
+                return Ok(aligned_hint);
+            }
+        }
+        let candidate = self
+            .find_free_hole(aligned_len)
+            .ok_or(MmapPlacementError::NoMemory)?;
+        self.map_region(candidate, aligned_len, page_prot, anon);
+        self.mmap_hint = candidate.saturating_add(aligned_len);
+        Ok(candidate)
+    }
+
+    fn find_free_hole(&self, aligned_len: u64) -> Option<u64> {
+        let max_addr = self.max_address();
+        let wrap_start = if self.is_64bit {
+            0x0000_0000_4000_0000
+        } else {
+            0x1000_0000
+        };
+
+        let start_hint = page_align_down(self.mmap_hint);
+        let initial_candidate = if start_hint >= PAGE_SIZE
+            && start_hint
+                .checked_add(aligned_len)
+                .is_some_and(|end| end <= max_addr)
+        {
+            start_hint
+        } else {
+            wrap_start
+        };
+
+        let ranges = if initial_candidate > wrap_start {
+            vec![
+                (initial_candidate, max_addr),
+                (wrap_start, initial_candidate),
+            ]
+        } else {
+            vec![(initial_candidate, max_addr)]
+        };
+
+        for (search_start, search_limit) in ranges {
+            let mut candidate = search_start;
+            while candidate
+                .checked_add(aligned_len)
+                .is_some_and(|end| end <= search_limit)
+            {
+                let overlap = self
+                    .mappings
+                    .iter()
+                    .find(|m| candidate < m.end && candidate.saturating_add(aligned_len) > m.start);
+
+                match overlap {
+                    Some(m) => {
+                        let next = page_align_up(m.end);
+                        if next <= candidate {
+                            candidate = candidate.saturating_add(PAGE_SIZE);
+                        } else {
+                            candidate = next;
+                        }
+                    }
+                    None => return Some(candidate),
+                }
+            }
+        }
+
+        None
+    }
+
     /// `mmap`'s placement rule. With `MAP_FIXED` the range is mapped exactly
     /// where asked, replacing whatever is there. Without it `addr` is only a
     /// hint: it is used when the range is free and ignored otherwise, so a
@@ -498,62 +670,15 @@ impl PageMap {
     /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
     /// Returns the base address on success, or `0` on allocation failure.
     pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
-        if len > self.max_address() {
+        let Some(aligned_len) = checked_aligned_len(len.max(1), self.max_address()) else {
             return 0;
-        }
-        let len = page_align_up(len.max(1));
-        let max_addr = self.max_address();
-        let wrap_start = if self.is_64bit {
-            0x0000_0000_4000_0000
-        } else {
-            0x1000_0000
         };
-
-        let start_hint = page_align_down(self.mmap_hint);
-        let initial_candidate =
-            if start_hint >= PAGE_SIZE && start_hint.saturating_add(len) <= max_addr {
-                start_hint
-            } else {
-                wrap_start
-            };
-
-        let ranges = if initial_candidate > wrap_start {
-            vec![
-                (initial_candidate, max_addr),
-                (wrap_start, initial_candidate),
-            ]
-        } else {
-            vec![(initial_candidate, max_addr)]
+        let Some(candidate) = self.find_free_hole(aligned_len) else {
+            return 0;
         };
-
-        for (search_start, search_limit) in ranges {
-            let mut candidate = search_start;
-            while candidate.saturating_add(len) <= search_limit {
-                // Find first overlapping mapping in self.mappings (sorted by start)
-                let overlap = self
-                    .mappings
-                    .iter()
-                    .find(|m| candidate < m.end && candidate.saturating_add(len) > m.start);
-
-                match overlap {
-                    Some(m) => {
-                        let next = page_align_up(m.end);
-                        if next <= candidate {
-                            candidate = candidate.saturating_add(PAGE_SIZE);
-                        } else {
-                            candidate = next;
-                        }
-                    }
-                    None => {
-                        self.map_region(candidate, len, page_prot | prot::ANON, true);
-                        self.mmap_hint = candidate.saturating_add(len);
-                        return candidate;
-                    }
-                }
-            }
-        }
-
-        0
+        self.map_region(candidate, aligned_len, page_prot | prot::ANON, true);
+        self.mmap_hint = candidate.saturating_add(aligned_len);
+        candidate
     }
 
     /// Adjust the program break. Returns the new break.
