@@ -320,10 +320,7 @@ fn try_and_mask_preserves_semantics_across_widths() {
         tracker.build(&func_unknown);
         let target = &func_unknown.blocks[0].ops[0];
         let res = rules.try_optimize_with_tracker(target, &tracker, &func_unknown);
-        assert!(
-            res.is_none(),
-            "size={size}: x & y must not be eliminated"
-        );
+        assert!(res.is_none(), "size={size}: x & y must not be eliminated");
 
         // Partial mask on LHS must not fold to COPY(const).
         let func_lhs_partial = single_block(vec![
