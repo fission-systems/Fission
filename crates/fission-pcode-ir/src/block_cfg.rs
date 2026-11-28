@@ -275,6 +275,7 @@ pub fn is_instruction_local_forward_branch(
         })
 }
 
+/// Return the constant value of `vn` if it is a constant varnode.
 pub fn const_offset(vn: &Varnode) -> Option<i64> {
     if vn.is_constant {
         Some(vn.constant_val)
@@ -283,6 +284,7 @@ pub fn const_offset(vn: &Varnode) -> Option<i64> {
     }
 }
 
+/// Return the code address targeted by branch varnode `vn`, if it can be determined.
 pub fn branch_target_address(vn: &Varnode) -> Option<u64> {
     if vn.is_constant {
         if vn.offset != 0 {
@@ -299,6 +301,7 @@ pub fn branch_target_address(vn: &Varnode) -> Option<u64> {
     }
 }
 
+/// Resolve the basic-block index targeted by branch varnode `vn` within `pcode`.
 pub fn resolve_branch_target_index(
     pcode: &PcodeFunction,
     address_to_index: &HashMap<u64, usize>,
@@ -312,6 +315,7 @@ pub fn resolve_branch_target_index(
     })
 }
 
+/// Compute the sequence number targeted by an instruction-local branch.
 pub fn instruction_local_branch_target_seq(op: &PcodeOp, vn: &Varnode) -> Option<u32> {
     if vn.space_id != 0 || !vn.is_constant {
         return None;
@@ -442,6 +446,7 @@ fn resolve_instruction_local_branch_target_index(
         })
 }
 
+/// Format a human-readable label for a block identified by `address`.
 pub fn block_label(address: u64) -> String {
     if address & DUPLICATE_BLOCK_KEY_TAG != 0 {
         let ordinal = (address >> 48) & 0x7fff;
