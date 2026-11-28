@@ -16,6 +16,7 @@
 #![allow(unused_assignments)]
 #![forbid(unsafe_code)]
 
+/// Architecture-specific p-code helpers.
 pub mod arch;
 pub mod block_cfg;
 pub mod cfg;

@@ -9,22 +9,35 @@ use serde::{Deserialize, Serialize, de::Error as _};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PcodeOpcode {
     // Data movement
+    /// Copies the input value to the output.
     Copy,
+    /// Loads a value from memory.
     Load,
+    /// Stores a value to memory.
     Store,
 
     // Control flow
+    /// Unconditional control-flow transfer to a target.
     Branch,
+    /// Conditional control-flow transfer to a target.
     CBranch,
+    /// Indirect control-flow transfer through a computed target.
     BranchInd,
+    /// Direct call to a target.
     Call,
+    /// Indirect call through a computed target.
     CallInd,
+    /// Call to an architecture-specific user-defined operation.
     CallOther,
+    /// Returns from the current function.
     Return,
 
     // Integer arithmetic
+    /// Integer equality comparison.
     IntEqual,
+    /// Integer inequality comparison.
     IntNotEqual,
+    /// Signed integer less-than comparison.
     IntSLess,
     IntSLessEqual,
     IntLess,
