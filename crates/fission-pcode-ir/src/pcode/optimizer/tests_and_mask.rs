@@ -77,8 +77,9 @@ fn try_and_mask_keeps_different_non_constant_nz_masks() {
     // Counterexample: x = 0, byte = 0xAB => x & zext(byte) = 0,
     // whereas the unsound COPY(zext(byte)) rewrite produced 0xAB.
     let (x, byte, narrow, out) = (vn(0x10, 4), vn(0x14, 1), vn(0x100, 4), vn(0x104, 4));
+    let zext_in = vec![byte.clone()];
     let ops_wide_lhs = optimize_ops(vec![
-        op(0, PcodeOpcode::IntZExt, narrow.clone(), vec![byte.clone()]),
+        op(0, PcodeOpcode::IntZExt, narrow.clone(), zext_in),
         op(
             1,
             PcodeOpcode::IntAnd,
@@ -87,8 +88,11 @@ fn try_and_mask_keeps_different_non_constant_nz_masks() {
         ),
         ret(2, out.clone()),
     ]);
+    let has_wide_lhs_and = ops_wide_lhs
+        .iter()
+        .any(|op| op.opcode == PcodeOpcode::IntAnd);
     assert!(
-        ops_wide_lhs.iter().any(|op| op.opcode == PcodeOpcode::IntAnd),
+        has_wide_lhs_and,
         "x & zext(byte) must keep IntAnd: {ops_wide_lhs:?}"
     );
 
@@ -97,8 +101,11 @@ fn try_and_mask_keeps_different_non_constant_nz_masks() {
         op(1, PcodeOpcode::IntAnd, out.clone(), vec![narrow, x]),
         ret(2, out),
     ]);
+    let has_narrow_lhs_and = ops_narrow_lhs
+        .iter()
+        .any(|op| op.opcode == PcodeOpcode::IntAnd);
     assert!(
-        ops_narrow_lhs.iter().any(|op| op.opcode == PcodeOpcode::IntAnd),
+        has_narrow_lhs_and,
         "zext(byte) & x must keep IntAnd: {ops_narrow_lhs:?}"
     );
 }
@@ -200,15 +207,17 @@ fn try_and_mask_eliminates_valid_identity_masks() {
     ]);
     let mut tracker = DefUseTracker::new();
     tracker.build(&func_lhs_full);
+    let target = &func_lhs_full.blocks[0].ops[0];
     let opt = rules
-        .try_optimize_with_tracker(&func_lhs_full.blocks[0].ops[0], &tracker, &func_lhs_full)
+        .try_optimize_with_tracker(target, &tracker, &func_lhs_full)
         .expect("0xFFFF_FFFF & y should simplify to COPY(y)");
     assert_eq!(opt.opcode, PcodeOpcode::Copy);
     assert_eq!(opt.inputs, vec![y]);
 
     // Left constant covering zext(byte): 0xFF & zext(byte) => COPY(zext(byte)).
+    let zext_in = vec![byte.clone()];
     let func_lhs_zext = single_block(vec![
-        op(0, PcodeOpcode::IntZExt, wide.clone(), vec![byte.clone()]),
+        op(0, PcodeOpcode::IntZExt, wide.clone(), zext_in),
         op(
             1,
             PcodeOpcode::IntAnd,
@@ -218,8 +227,9 @@ fn try_and_mask_eliminates_valid_identity_masks() {
         ret(2, out.clone()),
     ]);
     tracker.build(&func_lhs_zext);
+    let target = &func_lhs_zext.blocks[0].ops[1];
     let opt = rules
-        .try_optimize_with_tracker(&func_lhs_zext.blocks[0].ops[1], &tracker, &func_lhs_zext)
+        .try_optimize_with_tracker(target, &tracker, &func_lhs_zext)
         .expect("0xFF & zext(byte) should simplify to COPY(zext(byte))");
     assert_eq!(opt.opcode, PcodeOpcode::Copy);
     assert_eq!(opt.inputs, vec![wide.clone()]);
@@ -236,8 +246,9 @@ fn try_and_mask_eliminates_valid_identity_masks() {
         ret(2, out),
     ]);
     tracker.build(&func_rhs_zext);
+    let target = &func_rhs_zext.blocks[0].ops[1];
     let opt = rules
-        .try_optimize_with_tracker(&func_rhs_zext.blocks[0].ops[1], &tracker, &func_rhs_zext)
+        .try_optimize_with_tracker(target, &tracker, &func_rhs_zext)
         .expect("zext(byte) & 0xFF should simplify to COPY(zext(byte))");
     assert_eq!(opt.opcode, PcodeOpcode::Copy);
     assert_eq!(opt.inputs, vec![wide]);
@@ -284,7 +295,11 @@ fn try_and_mask_preserves_semantics_across_widths() {
     let cases: &[(u32, i64, i64)] = &[
         (1, 0x0F, 0xFF),
         (2, 0x00FF, 0xFFFF),
+        (3, 0x0000_FFFF, 0x00FF_FFFF),
         (4, 0x0000_FFFF, 0xFFFF_FFFF),
+        (5, 0x0000_FFFF_FFFF, 0x00FF_FFFF_FFFF),
+        (6, 0x0000_FFFF_FFFF, 0xFFFF_FFFF_FFFF),
+        (7, 0x0000_FFFF_FFFF_FFFF, 0x00FF_FFFF_FFFF_FFFF),
         (8, 0xFFFF_FFFF, -1),
     ];
 
@@ -303,10 +318,10 @@ fn try_and_mask_preserves_semantics_across_widths() {
         ]);
         let mut tracker = DefUseTracker::new();
         tracker.build(&func_unknown);
+        let target = &func_unknown.blocks[0].ops[0];
+        let res = rules.try_optimize_with_tracker(target, &tracker, &func_unknown);
         assert!(
-            rules
-                .try_optimize_with_tracker(&func_unknown.blocks[0].ops[0], &tracker, &func_unknown)
-                .is_none(),
+            res.is_none(),
             "size={size}: x & y must not be eliminated"
         );
 
@@ -321,14 +336,10 @@ fn try_and_mask_preserves_semantics_across_widths() {
             ret(1, out.clone()),
         ]);
         tracker.build(&func_lhs_partial);
+        let target = &func_lhs_partial.blocks[0].ops[0];
+        let res = rules.try_optimize_with_tracker(target, &tracker, &func_lhs_partial);
         assert!(
-            rules
-                .try_optimize_with_tracker(
-                    &func_lhs_partial.blocks[0].ops[0],
-                    &tracker,
-                    &func_lhs_partial,
-                )
-                .is_none(),
+            res.is_none(),
             "size={size}: partial_mask & y must not be eliminated"
         );
 
@@ -343,32 +354,195 @@ fn try_and_mask_preserves_semantics_across_widths() {
             ret(1, out),
         ]);
         tracker.build(&func_lhs_full);
+        let target = &func_lhs_full.blocks[0].ops[0];
         let opt = rules
-            .try_optimize_with_tracker(&func_lhs_full.blocks[0].ops[0], &tracker, &func_lhs_full)
+            .try_optimize_with_tracker(target, &tracker, &func_lhs_full)
             .expect("full-width mask on LHS should simplify to COPY(y)");
         assert_eq!(opt.opcode, PcodeOpcode::Copy);
         assert_eq!(opt.inputs, vec![y]);
     }
+}
 
-    // 16-byte (> 64-bit) operands must not be eliminated using 64-bit NZ masks.
-    let (wide_y, wide_out) = (vn(0x10, 16), vn(0x100, 16));
-    let func_wide = single_block(vec![
+#[test]
+fn try_and_mask_guards_wide_simd_and_malformed_shapes() {
+    let rules = OptimizationRules::new();
+    let (v16, x16, y16, t16, out16, u16) = (
+        vn(0x10, 16),
+        vn(0x20, 16),
+        vn(0x30, 16),
+        vn(0x40, 16),
+        vn(0x100, 16),
+        vn(0x110, 16),
+    );
+    let mut tracker = DefUseTracker::new();
+
+    // 1. 16-byte (> 64-bit) LHS and RHS constants must not be eliminated by
+    //    either `try_and_mask` or `dead_bit::try_dead_bit_elimination`.
+    for inputs in [
+        vec![Varnode::constant(-1, 16), y16.clone()],
+        vec![y16.clone(), Varnode::constant(-1, 16)],
+    ] {
+        let func_wide = single_block(vec![
+            op(0, PcodeOpcode::IntAnd, out16.clone(), inputs),
+            ret(1, out16.clone()),
+        ]);
+        tracker.build(&func_wide);
+        let target = &func_wide.blocks[0].ops[0];
+        assert!(
+            rules
+                .try_optimize_with_tracker(target, &tracker, &func_wide)
+                .is_none(),
+            "size=16: >64-bit IntAnd must not be eliminated by 64-bit masks"
+        );
+    }
+
+    // 2. 128-bit `x = v << 64` has low-64 `nz_mask == 0`, but upper bits 64..127
+    //    may be nonzero; `x & y` must NOT fold to 0 via `and_mask == 0`.
+    let func_shift64 = single_block(vec![
+        op(
+            0,
+            PcodeOpcode::IntLeft,
+            x16.clone(),
+            vec![v16.clone(), Varnode::constant(64, 4)],
+        ),
+        op(
+            1,
+            PcodeOpcode::IntAnd,
+            out16.clone(),
+            vec![x16.clone(), y16.clone()],
+        ),
+        ret(2, out16.clone()),
+    ]);
+    tracker.build(&func_shift64);
+    let target = &func_shift64.blocks[0].ops[1];
+    assert!(
+        rules
+            .try_optimize_with_tracker(target, &tracker, &func_shift64)
+            .is_none(),
+        "size=16: (v << 64) & y must not fold to 0"
+    );
+
+    // 3. 128-bit consume-mask check: `u = (( (v << 64) | 0x0F ) & y) >> 4`
+    //    consumes upper bits >= 64 that are unrepresented in u64 masks.
+    let func_consume16 = single_block(vec![
+        op(
+            0,
+            PcodeOpcode::IntLeft,
+            t16.clone(),
+            vec![v16, Varnode::constant(64, 4)],
+        ),
+        op(
+            1,
+            PcodeOpcode::IntOr,
+            x16.clone(),
+            vec![t16, Varnode::constant(0x0F, 16)],
+        ),
+        op(2, PcodeOpcode::IntAnd, out16.clone(), vec![x16, y16]),
+        op(
+            3,
+            PcodeOpcode::IntRight,
+            u16.clone(),
+            vec![out16, Varnode::constant(4, 4)],
+        ),
+        ret(4, u16),
+    ]);
+    tracker.build(&func_consume16);
+    let target = &func_consume16.blocks[0].ops[2];
+    assert!(
+        rules
+            .try_optimize_with_tracker(target, &tracker, &func_consume16)
+            .is_none(),
+        "size=16: 128-bit IntAnd must not fold to 0 under 64-bit consume mask"
+    );
+
+    // 4. Sign-extended narrow constants (-1:1 = 0xFF, -128:1 = 0x80) must be
+    //    masked to their declared 1-byte width, never sign-extended to u64::MAX
+    //    or 0xFFFF_FFFF_FFFF_FF80.
+    let (x4, out4, out1) = (vn(0x50, 4), vn(0x120, 4), vn(0x130, 1));
+    let func_narrow_neg = single_block(vec![
         op(
             0,
             PcodeOpcode::IntAnd,
-            wide_out.clone(),
-            vec![Varnode::constant(-1, 16), wide_y],
+            out4.clone(),
+            vec![x4, Varnode::constant(-128, 1)],
         ),
-        ret(1, wide_out),
+        ret(1, out4),
     ]);
-    let mut tracker = DefUseTracker::new();
-    tracker.build(&func_wide);
+    tracker.build(&func_narrow_neg);
+    let target = &func_narrow_neg.blocks[0].ops[0];
     assert!(
         rules
-            .try_optimize_with_tracker(&func_wide.blocks[0].ops[0], &tracker, &func_wide)
+            .try_optimize_with_tracker(target, &tracker, &func_narrow_neg)
             .is_none(),
-        "size=16: >64-bit IntAnd must not be eliminated by 64-bit NZ masks"
+        "mismatched width + negative 1-byte constant must not be eliminated"
     );
+
+    // Same-width 1-byte `x:1 & (-128:1)` keeps only bit 7 and must stay IntAnd.
+    let x1 = vn(0x60, 1);
+    let func_u8_neg128 = single_block(vec![
+        op(
+            0,
+            PcodeOpcode::IntAnd,
+            out1.clone(),
+            vec![x1.clone(), Varnode::constant(-128, 1)],
+        ),
+        ret(1, out1.clone()),
+    ]);
+    tracker.build(&func_u8_neg128);
+    let target = &func_u8_neg128.blocks[0].ops[0];
+    assert!(
+        rules
+            .try_optimize_with_tracker(target, &tracker, &func_u8_neg128)
+            .is_none(),
+        "x:1 & (-128:1) clears bits 0..6 and must not be eliminated"
+    );
+
+    // Same-width 1-byte `(-1:1) & x:1` has full 1-byte mask 0xFF and simplifies to COPY(x:1).
+    let func_u8_neg1 = single_block(vec![
+        op(
+            0,
+            PcodeOpcode::IntAnd,
+            out1.clone(),
+            vec![Varnode::constant(-1, 1), x1.clone()],
+        ),
+        ret(1, out1.clone()),
+    ]);
+    tracker.build(&func_u8_neg1);
+    let target = &func_u8_neg1.blocks[0].ops[0];
+    let opt = rules
+        .try_optimize_with_tracker(target, &tracker, &func_u8_neg1)
+        .expect("(-1:1) & x:1 should simplify to COPY(x:1)");
+    assert_eq!(opt.opcode, PcodeOpcode::Copy);
+    assert_eq!(opt.inputs, vec![x1.clone()]);
+
+    // 5. Malformed operations (output: None, size == 0, or inputs.len() != 2)
+    //    must conservatively return None.
+    let no_out_op = PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::IntAnd,
+        address: 0x1000,
+        output: None,
+        inputs: vec![x1.clone(), Varnode::constant(-1, 1)],
+        asm_mnemonic: None,
+    };
+    let zero_size_op = op(
+        0,
+        PcodeOpcode::IntAnd,
+        vn(0x140, 0),
+        vec![vn(0x70, 0), Varnode::constant(0, 0)],
+    );
+    let unary_and_op = op(0, PcodeOpcode::IntAnd, out1, vec![x1]);
+    for malformed in [no_out_op, zero_size_op, unary_and_op] {
+        let func_malformed = single_block(vec![malformed]);
+        tracker.build(&func_malformed);
+        let target = &func_malformed.blocks[0].ops[0];
+        assert!(
+            rules
+                .try_optimize_with_tracker(target, &tracker, &func_malformed)
+                .is_none(),
+            "malformed IntAnd must return None"
+        );
+    }
 }
 
 #[test]
@@ -382,23 +556,24 @@ fn try_and_mask_exhaustive_u8_bitvector_soundness() {
         vn(0x108, 1),
     );
 
-    let eval_vn = |vn: &Varnode, lhs_vn: &Varnode, rhs_vn: &Varnode, lv: u8, rv: u8| -> u8 {
+    let eval_vn = |vn: &Varnode, lhs: &Varnode, rhs: &Varnode, lv: u8, rv: u8| -> u8 {
         if vn.is_constant {
             (vn.constant_val as u64 & 0xFF) as u8
-        } else if vn == lhs_vn {
+        } else if vn == lhs {
             lv
-        } else if vn == rhs_vn {
+        } else if vn == rhs {
             rv
         } else {
             panic!("unexpected varnode in optimized IntAnd: {vn:?}");
         }
     };
-    let eval_op = |op: &PcodeOp, lhs_vn: &Varnode, rhs_vn: &Varnode, lv: u8, rv: u8| -> u8 {
+    let eval_op = |op: &PcodeOp, lhs: &Varnode, rhs: &Varnode, lv: u8, rv: u8| -> u8 {
         match op.opcode {
-            PcodeOpcode::Copy => eval_vn(&op.inputs[0], lhs_vn, rhs_vn, lv, rv),
+            PcodeOpcode::Copy => eval_vn(&op.inputs[0], lhs, rhs, lv, rv),
             PcodeOpcode::IntAnd => {
-                eval_vn(&op.inputs[0], lhs_vn, rhs_vn, lv, rv)
-                    & eval_vn(&op.inputs[1], lhs_vn, rhs_vn, lv, rv)
+                let l = eval_vn(&op.inputs[0], lhs, rhs, lv, rv);
+                let r = eval_vn(&op.inputs[1], lhs, rhs, lv, rv);
+                l & r
             }
             other => panic!("unexpected opcode from IntAnd optimization: {other:?}"),
         }
@@ -425,7 +600,7 @@ fn try_and_mask_exhaustive_u8_bitvector_soundness() {
                 let expected = xv & c;
                 assert_eq!(
                     actual, expected,
-                    "8-bit constant AND mismatch for c={c:#04x}, x={xv:#04x}: {effective:?}"
+                    "u8 const AND mismatch: c={c:#04x} x={xv:#04x}"
                 );
             }
         }
@@ -470,7 +645,7 @@ fn try_and_mask_exhaustive_u8_bitvector_soundness() {
                 assert_eq!(
                     effective.opcode,
                     PcodeOpcode::IntAnd,
-                    "overlapping non-constant masks ({m1:#04x}, {m2:#04x}) must stay IntAnd"
+                    "overlapping masks ({m1:#04x}, {m2:#04x}) must stay IntAnd"
                 );
             }
 
@@ -482,7 +657,7 @@ fn try_and_mask_exhaustive_u8_bitvector_soundness() {
                     let expected = av & bv;
                     assert_eq!(
                         actual, expected,
-                        "u8 var-var AND mismatch: m1={m1:#04x} m2={m2:#04x} x={xv:#04x} y={yv:#04x}"
+                        "u8 var-var AND mismatch: m1={m1:#04x} m2={m2:#04x}"
                     );
                 }
             }

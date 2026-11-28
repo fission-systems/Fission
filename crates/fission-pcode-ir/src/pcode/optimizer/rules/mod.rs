@@ -872,6 +872,16 @@ impl OptimizationRules {
         if op.opcode != PcodeOpcode::IntAnd || op.inputs.len() != 2 {
             return None;
         }
+        let out = op.output.as_ref()?;
+        if op.inputs[0].size == 0
+            || op.inputs[1].size == 0
+            || out.size == 0
+            || op.inputs[0].size > 8
+            || op.inputs[1].size > 8
+            || out.size > 8
+        {
+            return None;
+        }
 
         let mask1 = tracker.get_nz_mask(&op.inputs[0]);
         let mask2 = tracker.get_nz_mask(&op.inputs[1]);
@@ -882,13 +892,10 @@ impl OptimizationRules {
             return Some(self.make_constant(op, 0));
         }
 
-        // Check consume mask
-        if let Some(out) = &op.output {
-            let consume = tracker.get_consume_mask(out);
-            // If `out` is live/consumed, fold when no consumed bits can be nonzero.
-            if consume != 0 && (and_mask & consume) == 0 {
-                return Some(self.make_constant(op, 0));
-            }
+        // Check consume mask: if `out` is live/consumed, fold when no consumed bits can be nonzero.
+        let consume = tracker.get_consume_mask(out);
+        if consume != 0 && (and_mask & consume) == 0 {
+            return Some(self.make_constant(op, 0));
         }
 
         // `nz_mask` is a may-be-1 upper bound, not a must-be-1 lower bound.
@@ -896,21 +903,15 @@ impl OptimizationRules {
         // `a` is guaranteed 1 in `b`, which holds here only when `b` is a
         // constant (and symmetrically for `a & b => b` when `a` is a constant)
         // within the 64-bit mask width and with matching COPY output width.
-        if op.inputs[0].size > 8 || op.inputs[1].size > 8 {
-            return None;
-        }
-        let out_size = op.output.as_ref().map(|out| out.size);
         if op.inputs[1].is_constant && !op.inputs[0].is_constant {
             let rhs_const = unsigned_value(&op.inputs[1]);
-            let same_width = out_size.is_none_or(|size| size == op.inputs[0].size);
-            if same_width && (mask1 & rhs_const) == mask1 {
+            if out.size == op.inputs[0].size && (mask1 & rhs_const) == mask1 {
                 return Some(self.make_copy(op, &op.inputs[0]));
             }
         }
         if op.inputs[0].is_constant && !op.inputs[1].is_constant {
             let lhs_const = unsigned_value(&op.inputs[0]);
-            let same_width = out_size.is_none_or(|size| size == op.inputs[1].size);
-            if same_width && (mask2 & lhs_const) == mask2 {
+            if out.size == op.inputs[1].size && (mask2 & lhs_const) == mask2 {
                 return Some(self.make_copy(op, &op.inputs[1]));
             }
         }
