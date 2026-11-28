@@ -59,6 +59,7 @@ const DT_SONAME: i64 = 14;
 const DT_FLAGS: i64 = 30;
 const DF_BIND_NOW: u64 = 0x8;
 const DT_VERNEED: i64 = 0x6fff_fffe;
+const DT_VERSYM: i64 = 0x6fff_fffc;
 
 const R_X86_64_64: u32 = 1;
 const R_X86_64_JUMP_SLOT: u32 = 7;
@@ -532,7 +533,7 @@ fn symbol_conflicts_weak_override_and_hidden_visibility_follow_scope_rules() {
 }
 
 #[test]
-fn missing_transitive_dep_bad_reloc_versioning_and_traversal_fail_cleanly_preserving_state() {
+fn missing_transitive_dep_bad_reloc_and_traversal_fail_cleanly_preserving_state() {
     let dir = TestTempDir::new("failures");
 
     // 1. Missing transitive dependency: main -> liba -> missing_b.so
@@ -608,7 +609,9 @@ fn missing_transitive_dep_bad_reloc_versioning_and_traversal_fail_cleanly_preser
     );
     assert!(!state2.page_map.is_mapped(0x0000_7F00_0000_0000));
 
-    // 3. Unsupported GNU symbol versioning (DT_VERNEED) fails explicitly.
+    // 3. GNU symbol versioning (DT_VERNEED) is present in essentially every
+    //    glibc-linked object. Binding by bare name is a documented
+    //    approximation, so a versioned module must load instead of aborting.
     let lib_ver = build_elf64(&ElfSpec {
         e_type: ET_DYN,
         link_base: 0,
@@ -626,12 +629,21 @@ fn missing_transitive_dep_bad_reloc_versioning_and_traversal_fail_cleanly_preser
         needed: vec!["libver.so"],
         syms: vec![],
         relas: vec![],
-        extra_dyn_tags: vec![],
+        extra_dyn_tags: vec![(DT_VERSYM, 0x1200)],
     });
-    let (mut state3, bin3) = map_main_and_binary(main_ver, main_base);
-    let err = prepare_dynlink_with_search_paths(&mut state3, &bin3, &[dir.path().to_path_buf()])
-        .expect_err("DT_VERNEED must fail");
-    assert!(format!("{err:#}").contains("symbol versioning"), "{err:#}");
+    let (mut state3, bin3) = map_main_and_binary(main_ver.clone(), main_base);
+    let info = prepare_dynlink_with_search_paths(&mut state3, &bin3, &[dir.path().to_path_buf()])
+        .expect("versioned main and library must not be rejected");
+    assert_eq!(info.mode, DynlinkMode::SharedLibs);
+    assert_eq!(info.loaded_libs.len(), 1);
+
+    // The same versioned main with no configured roots is the real `emu run`
+    // case: it must degrade to HLE GOT instead of aborting the run.
+    let (mut state3b, bin3b) = map_main_and_binary(main_ver, main_base);
+    let info = prepare_dynlink_with_search_paths(&mut state3b, &bin3b, &[])
+        .expect("a versioned main without configured roots must fall back");
+    assert_eq!(info.mode, DynlinkMode::HleGot);
+    assert!(info.closure_error.is_some());
 
     // 4. Unsafe path-traversal soname (`../escape.so`) is rejected.
     let main_trav = build_elf64(&ElfSpec {
@@ -655,11 +667,18 @@ fn pinned_prelinked_fixture_requires_configured_root_and_records_identity() {
     let main_path = testdata.join("x64_needs_prelinked.elf");
     let binary = LoadedBinary::from_file(&main_path).unwrap();
 
-    // Missing from empty search path -> explicit failure, state preserved.
+    // Missing from empty search path -> HLE GOT fallback, never an aborted run:
+    // nothing was staged to resolve against, so the emulator keeps its
+    // documented high-level-emulation path and records why.
     let mut state_missing = MachineState::new();
-    let err = prepare_dynlink_with_search_paths(&mut state_missing, &binary, &[])
-        .expect_err("missing non-HLE dependency must fail");
-    assert!(err.to_string().contains("x64_prelinked_lib.so"), "{err:#}");
+    let info = prepare_dynlink_with_search_paths(&mut state_missing, &binary, &[])
+        .expect("unsatisfiable closure without configured roots must degrade, not fail");
+    assert_eq!(info.mode, DynlinkMode::HleGot);
+    let closure_error = info.closure_error.as_deref().unwrap_or_default();
+    assert!(
+        closure_error.contains("x64_prelinked_lib.so"),
+        "{closure_error}"
+    );
 
     // Configured target root -> loads at link address 0x700_0000 and records BLAKE3 digest.
     let mut state_ok = MachineState::new();

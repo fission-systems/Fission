@@ -93,6 +93,12 @@ pub struct DynlinkInfo {
     /// Global symbols from main + DT_NEEDED (for lazy PLT resolution).
     #[serde(default)]
     pub global_symbols: std::collections::HashMap<String, u64>,
+    /// Why the shared-library closure was abandoned and the HLE GOT path taken.
+    ///
+    /// Set only when target roots were not configured, so an unsatisfiable
+    /// closure degrades to high-level emulation instead of failing the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closure_error: Option<String>,
 }
 
 const PT_INTERP: u32 = 3;
@@ -500,11 +506,26 @@ fn prepare_dynlink_x86_64(
     // Mini-dynlink: discover transitive closure, map staged libs, build global
     // scope, and apply validated relocations before mutating `state`.
     let mut shared = SharedLoadResult::default();
+    let mut closure_error: Option<String> = None;
     if has_got
         || guest_interp.is_some()
         || !parse_dt_needed(binary.inner().data.as_slice()).0.is_empty()
     {
-        shared = load_shared_libraries_with_paths(state, binary, search_paths)?;
+        match load_shared_libraries_with_paths(state, binary, search_paths) {
+            Ok(loaded) => shared = loaded,
+            // With no configured roots there is nothing the closure could have
+            // resolved against, so refusing here would make every real
+            // glibc-linked binary un-runnable. `state` is untouched on error
+            // (all four phases stage before committing), so the documented HLE
+            // GOT path is still available.
+            Err(err) if search_paths.is_empty() => {
+                tracing::warn!(
+                    "dynlink: dependency closure unavailable ({err:#}); using HLE GOT (pass --lib-path or FISSION_LIB_PATH to load staged libraries)"
+                );
+                closure_error = Some(format!("{err:#}"));
+            }
+            Err(err) => return Err(err),
+        }
         if !shared.loaded_libs.is_empty() || shared.bind_now_applied {
             tracing::info!(
                 "dynlink: SharedLibs mode — {} libs, bind_now={}, globals={}",
@@ -527,6 +548,7 @@ fn prepare_dynlink_x86_64(
                 // bind_now false when lazy mode forced even if DT flags say NOW
                 bind_now: shared.bind_now_applied && !lazy_bind_enabled(),
                 global_symbols: shared.globals,
+                closure_error: None,
             });
         }
     }
@@ -545,6 +567,7 @@ fn prepare_dynlink_x86_64(
         symbol_conflicts: shared.symbol_conflicts,
         bind_now: false,
         global_symbols: shared.globals,
+        closure_error,
     })
 }
 
@@ -647,7 +670,9 @@ struct SharedLoadResult {
 }
 
 /// Configured target library roots only (`DynlinkOptions.lib_paths` then
-/// `FISSION_LIB_PATH`). Never falls back to unrestricted host system dirs.
+/// `FISSION_LIB_PATH`). Never falls back to unrestricted host system dirs: an
+/// empty result means no libraries were staged, and a closure that cannot be
+/// satisfied then degrades to the HLE GOT path instead of failing the run.
 fn lib_search_paths() -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = DYNLINK_OPTIONS
         .get()
@@ -663,9 +688,13 @@ fn lib_search_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// `DT_NEEDED` may be a bare soname, a relative path, or an absolute path.
+/// Under the target-root policy all three are resolved *inside* a configured
+/// root: the leading `/` is stripped, and traversal, backslashes and NUL are
+/// rejected so a crafted dependency cannot escape the root.
 fn validate_soname_for_root_lookup(soname: &str) -> Result<()> {
     if soname.is_empty()
-        || soname.contains('/')
+        || soname.trim_start_matches('/').is_empty()
         || soname.contains('\\')
         || soname.contains('\0')
         || soname.contains("..")
@@ -696,11 +725,14 @@ fn find_library_in_roots(soname: &str, search: &[PathBuf]) -> Option<PathBuf> {
     if validate_soname_for_root_lookup(soname).is_err() {
         return None;
     }
+    // An absolute or relative `DT_NEEDED` path resolves inside each root, never
+    // against the host filesystem.
+    let relative = soname.trim_start_matches('/');
     for dir in search {
         let Ok(canon_dir) = std::fs::canonicalize(dir) else {
             continue;
         };
-        let cand = canon_dir.join(soname);
+        let cand = canon_dir.join(relative);
         let Ok(canon_cand) = std::fs::canonicalize(&cand) else {
             continue;
         };
@@ -869,13 +901,14 @@ fn parse_dynamic_deps_and_soname(data: &[u8]) -> (Vec<String>, Option<String>, b
     (needed, soname, true)
 }
 
-fn check_unsupported_symbol_versioning(data: &[u8], module: &str) -> Result<()> {
+/// Report whether a module carries GNU symbol-versioning tables.
+fn symbol_versioning_present(data: &[u8]) -> bool {
     if data.len() < 64 {
-        return Ok(());
+        return false;
     }
     let elf = Elf(data);
     let Some(dynamic) = elf.program_headers().find(|ph| ph.p_type == PT_DYNAMIC) else {
-        return Ok(());
+        return false;
     };
     let dyn_off = usize::try_from(dynamic.p_offset).unwrap_or(usize::MAX);
     let dyn_filesz = usize::try_from(dynamic.p_filesz).unwrap_or(usize::MAX);
@@ -889,9 +922,25 @@ fn check_unsupported_symbol_versioning(data: &[u8], module: &str) -> Result<()> 
             break;
         }
         if matches!(tag, DT_VERSYM | DT_VERDEF | DT_VERNEED) {
-            anyhow::bail!("module `{module}` requires unsupported ELF symbol versioning (DT_VER*)");
+            return true;
         }
         i += 16;
+    }
+    false
+}
+
+/// Symbol versioning is not a reason to refuse a module.
+///
+/// Essentially every glibc-linked object carries `DT_VERNEED`/`DT_VERSYM`, so
+/// treating it as unsupported rejected real binaries before they could run.
+/// The mini-dynlinker resolves by bare symbol name, which satisfies a versioned
+/// reference with whatever definition the global scope holds -- an
+/// approximation worth a warning, not a load failure.
+fn check_unsupported_symbol_versioning(data: &[u8], module: &str) -> Result<()> {
+    if symbol_versioning_present(data) {
+        tracing::warn!(
+            "dynlink: `{module}` carries ELF symbol versioning (DT_VER*); symbols are bound by name and version requirements are ignored"
+        );
     }
     Ok(())
 }
