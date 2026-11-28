@@ -1,12 +1,25 @@
 use crate::pcode::optimizer::passes::def_use::DefUseTracker;
-use crate::pcode::{PcodeOp, PcodeOpcode};
+use crate::pcode::{PcodeOp, PcodeOpcode, truncate_to_varnode_width};
 
 /// Rule: Dead Bit Elimination
 ///
 /// Removes bitwise operations that do not affect the consumed bits of the output.
 /// Returns Some(new_op) if optimization is applied.
 pub fn try_dead_bit_elimination(op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
+    if op.inputs.len() != 2 {
+        return None;
+    }
     let out = op.output.as_ref()?;
+    if out.size == 0
+        || out.size > 8
+        || op.inputs[0].size == 0
+        || op.inputs[0].size > 8
+        || op.inputs[1].size == 0
+        || op.inputs[1].size > 8
+        || out.size != op.inputs[0].size
+    {
+        return None;
+    }
     let consume_mask = tracker.get_consume_mask(out);
 
     // If output is completely unused, let DCE handle it.
@@ -17,8 +30,9 @@ pub fn try_dead_bit_elimination(op: &PcodeOp, tracker: &DefUseTracker) -> Option
     match op.opcode {
         PcodeOpcode::IntAnd => {
             // Check for A = B & Constant
-            if op.inputs.len() == 2 && op.inputs[1].is_constant {
-                let mask = op.inputs[1].constant_val as u64;
+            if op.inputs[1].is_constant {
+                let raw_mask = op.inputs[1].constant_val as u64;
+                let mask = truncate_to_varnode_width(raw_mask, op.inputs[1].size);
                 let input_nz = tracker.get_nz_mask(&op.inputs[0]);
 
                 // Check if the mask is redundant.
@@ -40,8 +54,9 @@ pub fn try_dead_bit_elimination(op: &PcodeOp, tracker: &DefUseTracker) -> Option
 
         PcodeOpcode::IntOr | PcodeOpcode::IntXor => {
             // Check for A = B | Constant or A = B ^ Constant
-            if op.inputs.len() == 2 && op.inputs[1].is_constant {
-                let mask = op.inputs[1].constant_val as u64;
+            if op.inputs[1].is_constant {
+                let raw_mask = op.inputs[1].constant_val as u64;
+                let mask = truncate_to_varnode_width(raw_mask, op.inputs[1].size);
 
                 // Redundant if the constant mask only affects bits that are NOT consumed.
                 // Condition: (Mask & Consume) == 0

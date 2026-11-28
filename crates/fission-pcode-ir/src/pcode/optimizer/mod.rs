@@ -7,6 +7,8 @@ mod rules;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_and_mask;
+#[cfg(test)]
 mod tests_dead_bit;
 
 pub use driver::{PcodeOptimizer, PcodeOptimizerConfig};
