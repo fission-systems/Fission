@@ -869,7 +869,7 @@ impl OptimizationRules {
     /// - V & 0xff => V when V's NZMask is 0x0f (AND has no effect)
     /// - V & mask => #0 when (V's NZMask & mask) == 0
     fn try_and_mask(&self, op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
-        if op.opcode != PcodeOpcode::IntAnd || op.inputs.len() < 2 {
+        if op.opcode != PcodeOpcode::IntAnd || op.inputs.len() != 2 {
             return None;
         }
 
@@ -891,12 +891,28 @@ impl OptimizationRules {
             }
         }
 
-        // If AND doesn't clear any bits (no-op)
-        if and_mask == mask1 {
-            return Some(self.make_copy(op, &op.inputs[0]));
+        // `nz_mask` is a may-be-1 upper bound, not a must-be-1 lower bound.
+        // Rewriting `a & b => a` is only sound when every bit that may be 1 in
+        // `a` is guaranteed 1 in `b`, which holds here only when `b` is a
+        // constant (and symmetrically for `a & b => b` when `a` is a constant)
+        // within the 64-bit mask width and with matching COPY output width.
+        if op.inputs[0].size > 8 || op.inputs[1].size > 8 {
+            return None;
         }
-        if and_mask == mask2 && !op.inputs[1].is_constant {
-            return Some(self.make_copy(op, &op.inputs[1]));
+        let out_size = op.output.as_ref().map(|out| out.size);
+        if op.inputs[1].is_constant && !op.inputs[0].is_constant {
+            let rhs_const = unsigned_value(&op.inputs[1]);
+            let same_width = out_size.is_none_or(|size| size == op.inputs[0].size);
+            if same_width && (mask1 & rhs_const) == mask1 {
+                return Some(self.make_copy(op, &op.inputs[0]));
+            }
+        }
+        if op.inputs[0].is_constant && !op.inputs[1].is_constant {
+            let lhs_const = unsigned_value(&op.inputs[0]);
+            let same_width = out_size.is_none_or(|size| size == op.inputs[1].size);
+            if same_width && (mask2 & lhs_const) == mask2 {
+                return Some(self.make_copy(op, &op.inputs[1]));
+            }
         }
 
         None
