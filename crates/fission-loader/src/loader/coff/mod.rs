@@ -80,16 +80,30 @@ impl CoffLoader {
         if header.number_of_sections == 0 || header.number_of_sections > 512 {
             return false;
         }
-        let section_table_end = COFF_HEADER_SIZE
-            .saturating_add(header.size_of_optional_header as usize)
-            .saturating_add(header.number_of_sections as usize * COFF_SECTION_HEADER_SIZE);
+        let Some(section_table_bytes) =
+            (header.number_of_sections as usize).checked_mul(COFF_SECTION_HEADER_SIZE)
+        else {
+            return false;
+        };
+        let Some(section_table_end) = COFF_HEADER_SIZE
+            .checked_add(header.size_of_optional_header as usize)
+            .and_then(|start| start.checked_add(section_table_bytes))
+        else {
+            return false;
+        };
         if section_table_end > bytes.len() {
             return false;
         }
         if header.pointer_to_symbol_table != 0 || header.number_of_symbols != 0 {
             let sym_start = header.pointer_to_symbol_table as usize;
-            let sym_size = header.number_of_symbols as usize * COFF_SYMBOL_SIZE;
-            if sym_start == 0 || sym_start.saturating_add(sym_size) > bytes.len() {
+            let Some(sym_size) = (header.number_of_symbols as usize).checked_mul(COFF_SYMBOL_SIZE)
+            else {
+                return false;
+            };
+            let Some(sym_end) = sym_start.checked_add(sym_size) else {
+                return false;
+            };
+            if sym_start == 0 || sym_end > bytes.len() {
                 return false;
             }
         }
@@ -178,9 +192,14 @@ fn parse_sections(
     string_table: &[u8],
 ) -> Result<Vec<CoffSection>> {
     let mut sections = Vec::new();
-    let mut offset = COFF_HEADER_SIZE + header.size_of_optional_header as usize;
+    let mut offset = COFF_HEADER_SIZE
+        .checked_add(header.size_of_optional_header as usize)
+        .ok_or_else(|| err!(loader, "COFF section table out of bounds"))?;
     for _ in 0..header.number_of_sections {
-        if offset + COFF_SECTION_HEADER_SIZE > bytes.len() {
+        let end = offset
+            .checked_add(COFF_SECTION_HEADER_SIZE)
+            .ok_or_else(|| err!(loader, "COFF section table out of bounds"))?;
+        if end > bytes.len() {
             return Err(err!(loader, "COFF section table out of bounds"));
         }
         let name = parse_coff_name(&bytes[offset..offset + 8], string_table);
@@ -213,7 +232,7 @@ fn parse_sections(
             characteristics,
             assigned_address: 0,
         });
-        offset += COFF_SECTION_HEADER_SIZE;
+        offset = end;
     }
     Ok(sections)
 }
@@ -240,7 +259,10 @@ fn parse_symbols(bytes: &[u8], header: &CoffHeader, string_table: &[u8]) -> Vec<
     let mut index = 0u32;
     let mut offset = header.pointer_to_symbol_table as usize;
     while index < header.number_of_symbols {
-        if offset + COFF_SYMBOL_SIZE > bytes.len() {
+        let Some(entry_end) = offset.checked_add(COFF_SYMBOL_SIZE) else {
+            break;
+        };
+        if entry_end > bytes.len() {
             break;
         }
         let name = parse_coff_name(&bytes[offset..offset + 8], string_table);
@@ -255,9 +277,11 @@ fn parse_symbols(bytes: &[u8], header: &CoffHeader, string_table: &[u8]) -> Vec<
         let mut total_size = 0u32;
         if is_function_definition
             && number_of_aux_symbols > 0
-            && offset + COFF_SYMBOL_SIZE + 8 <= bytes.len()
+            && entry_end
+                .checked_add(8)
+                .is_some_and(|aux_end| aux_end <= bytes.len())
         {
-            total_size = read_u32(bytes, offset + COFF_SYMBOL_SIZE + 4).unwrap_or(0);
+            total_size = read_u32(bytes, entry_end + 4).unwrap_or(0);
         }
         symbols.push(CoffSymbol {
             name,
@@ -268,9 +292,18 @@ fn parse_symbols(bytes: &[u8], header: &CoffHeader, string_table: &[u8]) -> Vec<
             number_of_aux_symbols,
             total_size,
         });
-        let advance = 1 + number_of_aux_symbols as u32;
-        index = index.saturating_add(advance);
-        offset = offset.saturating_add(advance as usize * COFF_SYMBOL_SIZE);
+        let advance = 1u32 + number_of_aux_symbols as u32;
+        let Some(next_index) = index.checked_add(advance) else {
+            break;
+        };
+        let Some(advance_bytes) = (advance as usize).checked_mul(COFF_SYMBOL_SIZE) else {
+            break;
+        };
+        let Some(next_offset) = offset.checked_add(advance_bytes) else {
+            break;
+        };
+        index = next_index;
+        offset = next_offset;
     }
     symbols
 }
@@ -295,7 +328,7 @@ fn classify_symbols(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<Fun
             }
             functions.push(FunctionInfo {
                 name: symbol.name.clone(),
-                address: COFF_EXTERNAL_IMAGE_BASE + external_index * 8,
+                address: COFF_EXTERNAL_IMAGE_BASE.saturating_add(external_index.saturating_mul(8)),
                 size: 0,
                 is_export: false,
                 is_import: true,
@@ -325,7 +358,7 @@ fn classify_symbols(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<Fun
         }
         functions.push(FunctionInfo {
             name: symbol.name.clone(),
-            address: section.assigned_address + symbol.value as u64,
+            address: section.assigned_address.saturating_add(symbol.value as u64),
             size: symbol.total_size as u64,
             is_export: symbol.storage_class == C_EXT,
             is_import: false,
@@ -356,7 +389,7 @@ fn parse_cfg_label_leaders(symbols: &[CoffSymbol], sections: &[CoffSection]) -> 
         if !section.is_executable() {
             continue;
         }
-        leaders.push(section.assigned_address + symbol.value as u64);
+        leaders.push(section.assigned_address.saturating_add(symbol.value as u64));
     }
     leaders.sort_unstable();
     leaders.dedup();
@@ -364,18 +397,32 @@ fn parse_cfg_label_leaders(symbols: &[CoffSymbol], sections: &[CoffSection]) -> 
 }
 
 fn parse_string_table<'a>(bytes: &'a [u8], header: &CoffHeader) -> &'a [u8] {
-    let start = header.pointer_to_symbol_table as usize
-        + header.number_of_symbols as usize * COFF_SYMBOL_SIZE;
-    if start + 4 > bytes.len() {
+    if header.pointer_to_symbol_table == 0 {
+        return &[];
+    }
+    let Some(symtab_size) = (header.number_of_symbols as usize).checked_mul(COFF_SYMBOL_SIZE)
+    else {
+        return &[];
+    };
+    let Some(start) = (header.pointer_to_symbol_table as usize).checked_add(symtab_size) else {
+        return &[];
+    };
+    let Some(header_end) = start.checked_add(4) else {
+        return &[];
+    };
+    if header_end > bytes.len() {
         return &[];
     }
     let Some(size) = read_u32(bytes, start).map(|value| value as usize) else {
         return &[];
     };
-    if size < 4 || start + size > bytes.len() {
+    let Some(end) = start.checked_add(size) else {
+        return &[];
+    };
+    if size < 4 || end > bytes.len() {
         return &[];
     }
-    &bytes[start..start + size]
+    &bytes[start..end]
 }
 
 fn parse_coff_name(raw: &[u8], string_table: &[u8]) -> String {
@@ -415,25 +462,22 @@ fn extract_string_table_name(string_table: &[u8], offset: usize) -> String {
 
 fn align_up(value: u64, alignment: u64) -> u64 {
     let alignment = alignment.max(1);
-    (value + alignment - 1) & !(alignment - 1)
+    value.saturating_add(alignment - 1) & !(alignment - 1)
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(
-        bytes.get(offset..offset + 2)?.try_into().ok()?,
-    ))
+    let end = offset.checked_add(2)?;
+    Some(u16::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
 fn read_i16(bytes: &[u8], offset: usize) -> Option<i16> {
-    Some(i16::from_le_bytes(
-        bytes.get(offset..offset + 2)?.try_into().ok()?,
-    ))
+    let end = offset.checked_add(2)?;
+    Some(i16::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(
-        bytes.get(offset..offset + 4)?.try_into().ok()?,
-    ))
+    let end = offset.checked_add(4)?;
+    Some(u32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
 #[cfg(test)]
